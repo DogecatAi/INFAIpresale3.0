@@ -21,6 +21,7 @@ function App() {
           width="100%" 
           overflowY="auto" 
           minHeight="0" 
+          className="scroll-container" // Added class for scrollbar styling
         >
           {/* Card Centering Area - This will grow and push footer down */}
           <Flex
@@ -31,21 +32,6 @@ function App() {
             justifyContent="center" // Vertically center PresaleCard within this growing area
             py={4} // Padding around the card area
           >
-            {/* Logo above PresaleCard */}
-            <Flex 
-              justifyContent="center" // Center the image horizontally
-              mb={4}                  // Margin below the logo
-              width="100%" 
-              maxW="lg"               // Align with PresaleCard's maxW
-              mx="auto"               // Center the Flex container itself
-            >
-              <Image 
-                src={infaiLogo} 
-                alt="INFAI Logo" 
-                maxH="220px" // Reduced height
-                objectFit="contain" 
-              />
-            </Flex>
             
             {/* Main presale card wrapper */}
             <Box 

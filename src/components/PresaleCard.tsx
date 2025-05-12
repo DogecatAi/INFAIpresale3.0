@@ -1,52 +1,36 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Box, // Ensuring Box is imported here
-  Button, Text, Heading, Divider, Stack, Switch,
-  Alert, AlertIcon,
+  Box, 
+  Button, Text, Heading, 
+  Alert, AlertIcon, AlertTitle, AlertDescription,
   Flex, 
-  Input, 
-  useToast, 
-  Progress,
-  HStack,
+  FormControl, FormLabel, Input, 
+  Tabs, TabList, TabPanels, Tab, TabPanel,
   VStack,
-  Center,
-  Spinner,
-  Card, // Ensure Card is imported
+  Card, 
   CardBody,
   CardFooter,
   CardHeader,
-  Link, // Import Link
+  Link, 
+  Select, 
+  useToast,
+  Divider,
+  HStack,
+  Spinner,
+  Progress
 } from '@chakra-ui/react';
 import { ethers } from 'ethers';
 import INFAIPresaleABI from '../abi/INFAIPresale.json'; 
-import INFAITokenABI from '../abi/INFAIToken.json'; // Updated from IERC20.json
-
-// Chakra-based component definitions
-const CardContainer = (props: React.PropsWithChildren<{}>) => <Box maxW="lg" mx="auto" mt={10} p={5} borderWidth="1px" borderRadius="lg" boxShadow="xl" {...props} />;
-const CustomInput = (props: any) => <Input {...props} mb={3} />;
-
-// Configuration for Infinaeon Network
-const INFINAEON_NETWORK = {
-  chainId: '0x668A0', // 420000 in decimal
-  chainName: 'Infinaeon',
-  nativeCurrency: {
-    name: 'ETH',
-    symbol: 'ETH',
-    decimals: 18,
-  },
-  rpcUrls: ['https://rpc.infinaeon.com'],
-  blockExplorerUrls: ['https://explorer.infinaeon.com'],
-};
+import INFAITokenABI from '../abi/INFAIToken.json'; 
+import { NETWORKS, NetworkConfig, setupNetwork } from '../config';
 
 // Presale and Token Configuration
-const PRESALE_CONTRACT_ADDRESS = '0xc979C705Cb994caD5f67c2D656e96446EE2E30A8';
-const INFAI_TOKEN_ADDRESS = '0x8FBc7648832358aC8cd76d705F9746179F9e7BF4';
 const PRESALE_CONFIG = {
-  rate: 1150, // 1 ETH = 1150 INFAI
-  hardCap: '10', // ETH
-  softCap: '3', // ETH
+  rate: 1_150_000, // Using underscore for readability
+  hardCap: '10',    // ETH
+  softCap: '3',     // ETH
   minContribution: '0.0166', // ETH
-  maxContribution: '0.16', // ETH
+  maxContribution: '0.16'  // ETH (No comma needed on the last item)
 };
 
 // Helper function to truncate addresses
@@ -55,225 +39,99 @@ const truncateAddress = (address: string | null | undefined): string => {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 };
 
-// Helper function for formatting numbers
-const formatNumber = (value: string | number, decimals: number = 2): string => {
-  const num = Number(value);
-  if (isNaN(num)) return '0.00';
-  return num.toFixed(decimals);
-};
-
 // Main PresaleCard component
-const PresaleCard: React.FC = () => {
+const PresaleCard = () => {
   // Wallet states
   const [isWalletInstalled] = useState<boolean>(true);
   const [isWalletConnected, setIsWalletConnected] = useState<boolean>(false);
-  const [account, setAccount] = useState<string | null>(null);
+  const [userAddress, setUserAddress] = useState<string | null>(null);
   const [signer, setSigner] = useState<ethers.Signer | null>(null);
   const [provider, setProvider] = useState<ethers.providers.Web3Provider | null>(null);
   const [isOnCorrectNetwork, setIsOnCorrectNetwork] = useState<boolean>(false);
 
   // Contract states
   const [presaleContract, setPresaleContract] = useState<ethers.Contract | null>(null);
-  const [usdcContract, setUsdcContract] = useState<ethers.Contract | null>(null); // Or your stablecoin
-  const [isOwner, setIsOwner] = useState<boolean>(false); // For Admin Panel
+  const [tokenContract, setTokenContract] = useState<ethers.Contract | null>(); 
+  const [isOwner, setIsOwner] = useState<boolean>(false); 
+  const [ownerAddress, setOwnerAddress] = useState<string | null>(null);
+
+  // Add state for contract status flags
+  const [presaleStatus, setPresaleStatus] = useState<boolean>(false);
+  const [emergencyStatus, setEmergencyStatus] = useState<boolean>(false);
+  const [claimsEnabledStatus, setClaimsEnabledStatus] = useState<boolean>(false);
 
   // Presale Data States
-  const [totalRaised, setTotalRaised] = useState<string>('0');
   const [tokensSold, setTokensSold] = useState<string>('0');
-  const [maxCap, setMaxCap] = useState<string>(PRESALE_CONFIG.hardCap);
-  const [userContribution, setUserContribution] = useState<string>('0');
-  const [minContribution, setMinContribution] = useState<string>(PRESALE_CONFIG.minContribution);
-  const [maxContribution, setMaxContribution] = useState<string>(PRESALE_CONFIG.maxContribution);
-  const [presaleActive, setPresaleActive] = useState<boolean>(false);
-  const [isClaimActive, setIsClaimActive] = useState<boolean>(false);
-  const [tokensClaimable, setTokensClaimable] = useState<string>('0');
-  const [emergencyStopActive, setEmergencyStopActive] = useState<boolean>(false);
+  const [totalContributedEth, setTotalContributedEth] = useState<string>('0'); // Dynamic
+  const [totalRaisedWei, setTotalRaisedWei] = useState<ethers.BigNumber>(ethers.BigNumber.from(0)); // State for totalRaised
+  const [presaleActive, setPresaleActive] = useState<boolean>(false); // Dynamic
+  const [isClaimActive, setIsClaimActive] = useState<boolean>(false); // Or read from contract if applicable
+  const [hardCapEth, setHardCapEth] = useState<string>('0'); // Static from contract
+  const [softCapEth, setSoftCapEth] = useState<string>('0'); // Static from contract
+  const [softCapWei, setSoftCapWei] = useState<ethers.BigNumber>(ethers.BigNumber.from(0)); // Static from contract (Wei)
+  const [minContributionEth, setMinContributionEth] = useState<string>('0'); // Static from contract
+  const [maxContributionEth, setMaxContributionEth] = useState<string>('0'); // Static from contract
+
+  // User Specific States
+  const [userEthBalance, setUserEthBalance] = useState<string>('0');
+  const [userTokenBalance, setUserTokenBalance] = useState<string>('0');
+  const [userContribution, setUserContribution] = useState<string>('0 ETH');
+  const [userContributionWei, setUserContributionWei] = useState<ethers.BigNumber>(ethers.BigNumber.from(0)); // User contribution (Wei)
+  const [tokensClaimable, setTokensClaimable] = useState<string>('0'); // Calculated or fetched
+  const [hasClaimed, setHasClaimed] = useState<boolean>(false);
+  const [tokenBalance, setTokenBalance] = useState<string>('0'); // Add token balance state
+  const [tokenDecimals, setTokenDecimals] = useState<number>(18); // Add token decimals state (default 18)
 
   // UI states
-  const [ethAmount, setEthAmount] = useState<string>('');
   const [tokensToReceive, setTokensToReceive] = useState<string>('0');
-  const [loading, setLoading] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [contributionAmount, setContributionAmount] = useState<string>('');
-  const [tokenSymbol, setTokenSymbol] = useState<string>('INFAI'); // Updated to INFAI from memory
-  const [presaleRate, setPresaleRate] = useState<number>(PRESALE_CONFIG.rate); // Tokens per ETH/Stablecoin
+  const [tokenSymbol, setTokenSymbol] = useState<string>('INFAI'); 
+  const [presaleRate, setPresaleRate] = useState<number>(0);
 
   // Button loading states
-  const [isConnecting, setIsConnecting] = useState<boolean>(false);
-  const [isContributing, setIsContributing] = useState<boolean>(false);
-  const [isClaiming, setIsClaiming] = useState<boolean>(false);
+  const [isTxLoading, setIsTxLoading] = useState<boolean>(false);
 
   const toast = useToast();
-  const [copySuccess, setCopySuccess] = useState<string>('');
   const [showTokenAddress, setShowTokenAddress] = useState<boolean>(false);
 
   // Admin Panel States
   const [adminNewRate, setAdminNewRate] = useState<string>('');
-  const [adminNewMinContribution, setAdminNewMinContribution] = useState<string>('');
-  const [adminNewMaxContribution, setAdminNewMaxContribution] = useState<string>('');
-  const [adminNewMaxCap, setAdminNewMaxCap] = useState<string>('');
 
-  // Effect for handling network/chain changes
-  useEffect(() => {
-    if ((window as any).ethereum) {
-      const handleChainChanged = () => {
-        window.location.reload();
-      };
+  // Network selection state
+  const [selectedNetworkKey, setSelectedNetworkKey] = useState<keyof typeof NETWORKS>('infinaeon'); // Use key for state
+  const selectedNetworkConfig = NETWORKS[selectedNetworkKey]; // Derive config from key
+  const [connectedChainId, setConnectedChainId] = useState<number | null>(null); 
 
-      (window as any).ethereum.on('chainChanged', handleChainChanged);
-
-      // Cleanup function to remove the listener when the component unmounts
-      return () => {
-        (window as any).ethereum.removeListener('chainChanged', handleChainChanged);
-      };
-    }
-  }, []); // Empty dependency array means this effect runs once on mount and cleans up on unmount
-
-  // Check if on Infinaeon network
-  const checkNetwork = useCallback(async (currentProvider: ethers.providers.Web3Provider) => {
-    const network = await currentProvider.getNetwork();
-    if (network.chainId.toString() === parseInt(INFINAEON_NETWORK.chainId, 16).toString()) {
-      setIsOnCorrectNetwork(true);
-    } else {
-      setIsOnCorrectNetwork(false);
-    }
-  }, []);
-
-  // Switch to Infinaeon network or add if not present
-  const switchToInfinaeonNetwork = useCallback(async (ethereum: any) => {
-    if (!ethereum) {
-      toast({ title: 'Wallet Error', description: 'MetaMask or a compatible wallet is not installed.', status: 'error', duration: 3000, isClosable: true });
-      return;
-    }
-    try {
-      await ethereum.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: INFINAEON_NETWORK.chainId }],
-      });
-      setIsOnCorrectNetwork(true); 
-    } catch (switchError: any) {
-      if (switchError.code === 4902) { 
-        try {
-          await ethereum.request({
-            method: 'wallet_addEthereumChain',
-            params: [INFINAEON_NETWORK],
-          });
-          setIsOnCorrectNetwork(true);
-        } catch (addError) {
-          console.error('Failed to add Infinaeon network:', addError);
-          toast({ title: 'Network Error', description: 'Failed to add Infinaeon network.', status: 'error', duration: 3000, isClosable: true });
-        }
-      } else {
-        console.error('Failed to switch network:', switchError);
-        toast({ title: 'Network Error', description: 'Failed to switch to Infinaeon network.', status: 'error', duration: 3000, isClosable: true });
-      }
-    }
-  }, [toast]);
-
-  const fetchContractData = useCallback(async (contractInstance?: ethers.Contract, userAddress?: string) => {
-    const currentContract = contractInstance || presaleContract;
-    const currentAccount = userAddress || account;
-    if (!currentContract || !isWalletConnected || !isOnCorrectNetwork || !currentAccount) return;
-
-    try {
-      const active = await currentContract.presaleActive();
-      setPresaleActive(active);
-      const raised = await currentContract.totalRaised();
-      setTotalRaised(ethers.utils.formatEther(raised));
-      const ownerAddress = await currentContract.owner();
-      setIsOwner(ownerAddress.toLowerCase() === currentAccount.toLowerCase());
-      const claimable = await currentContract.tokensClaimable();
-      setIsClaimActive(claimable);
-      const emergency = await currentContract.emergencyStop();
-      setEmergencyStopActive(emergency);
-      const rate = await currentContract.rate();
-      setPresaleRate(parseFloat(ethers.utils.formatUnits(rate, 0))); // If rate is integer tokens per ETH
-    } catch (error) {
-      console.error('Error fetching contract data:', error);
-      toast({
-        title: 'Error Fetching Data',
-        description: 'Could not fetch presale data from the contract.',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      });
-    }
-  }, [presaleContract, account, isWalletConnected, isOnCorrectNetwork, toast]); // toast in dependencies
-
-  const fetchUserContribution = useCallback(async (contractInstance?: ethers.Contract, userAddress?: string) => {
-    const currentContract = contractInstance || presaleContract;
-    const currentAccount = userAddress || account;
-    if (!currentContract || !currentAccount || !isWalletConnected || !isOnCorrectNetwork) return;
-    try {
-      const contribution = await currentContract.contributions(currentAccount);
-      const formattedContribution = ethers.utils.formatEther(contribution);
-      setUserContribution(formattedContribution);
-      if (parseFloat(formattedContribution) > 0) {
-        setShowTokenAddress(true);
-      }
-    } catch (error) {
-      console.error('Error fetching user contribution:', error);
-      toast({
-        title: 'Error Fetching Contribution',
-        description: 'Could not fetch your contribution data.',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      });
-    }
-  }, [presaleContract, account, isWalletConnected, isOnCorrectNetwork, toast]);
-
-  const handleContributionAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setContributionAmount(e.target.value);
-  };
-
-  const connectWallet = useCallback(async () => {
-    if ((window as any).ethereum) {
-      try {
-        const web3Provider = new ethers.providers.Web3Provider((window as any).ethereum);
-        setProvider(web3Provider);
-        await web3Provider.send('eth_requestAccounts', []);
-        const currentSigner = web3Provider.getSigner();
-        setSigner(currentSigner);
-        const currentAccount = await currentSigner.getAddress();
-        setAccount(currentAccount);
-        setIsWalletConnected(true);
-        await checkNetwork(web3Provider);
-
-        const contract = new ethers.Contract(PRESALE_CONTRACT_ADDRESS, INFAIPresaleABI, currentSigner);
-        setPresaleContract(contract);
-        
-        await fetchContractData(contract, currentAccount);
-        await fetchUserContribution(contract, currentAccount);
-
-      } catch (error) {
-        console.error('Error connecting wallet:', error);
-        toast({ title: 'Wallet Error', description: 'Failed to connect wallet.', status: 'error', duration: 3000, isClosable: true });
-        setIsWalletConnected(false);
-      }
-    } else {
-      toast({ title: 'Wallet Error', description: 'MetaMask or a compatible wallet is not installed.', status: 'error', duration: 3000, isClosable: true });
-    }
-  }, [checkNetwork, toast, fetchContractData, fetchUserContribution]); 
-
-  const handleDisconnectWallet = () => {
+  // Reset function
+  const resetState = useCallback(() => {
     setIsWalletConnected(false);
-    setAccount(null);
+    setUserAddress(null);
     setSigner(null);
     setProvider(null);
     setPresaleContract(null);
+    setTokenContract(null); 
     setIsOnCorrectNetwork(false);
     setIsOwner(false);
+    setOwnerAddress(null);
+    setPresaleStatus(false);
+    setEmergencyStatus(false);
+    setClaimsEnabledStatus(false);
 
-    setUserContribution('0');
+    setUserEthBalance('0');
+    setUserTokenBalance('0');
+    setUserContribution('0 ETH');
+    setUserContributionWei(ethers.BigNumber.from(0)); // Reset Wei value
     setTokensClaimable('0');
-    setTokensToReceive('0');
-    setContributionAmount('');
-    setShowTokenAddress(false);
+    setHasClaimed(false);
+    // Reset total raised
+    setTotalRaisedWei(ethers.BigNumber.from(0));
+    setTotalContributedEth('0');
+    setPresaleActive(false);
+    setIsClaimActive(false); 
+    setTokensSold('0'); 
 
     setAdminNewRate('');
-    setAdminNewMinContribution('');
-    setAdminNewMaxContribution('');
-    setAdminNewMaxCap('');
 
     toast({
       title: 'Wallet Disconnected',
@@ -282,525 +140,1247 @@ const PresaleCard: React.FC = () => {
       duration: 3000,
       isClosable: true,
     });
-  };
+  }, [toast]);
 
-  useEffect(() => {
-    if ((window as any).ethereum) {
-      const handleAccountsChanged = (accounts: string[]) => {
-        if (accounts.length === 0) {
-          handleDisconnectWallet();
-        } else {
-          setAccount(accounts[0]);
-          if (provider) {
-            const newSigner = provider.getSigner(accounts[0]);
-            setSigner(newSigner);
-            const contract = new ethers.Contract(PRESALE_CONTRACT_ADDRESS, INFAIPresaleABI, newSigner);
-            setPresaleContract(contract);
-            fetchContractData(contract, accounts[0]);
-            fetchUserContribution(contract, accounts[0]);
-          }
-        }
-      };
-
-      const handleChainChanged = (_chainId: string) => {
-        if(provider) checkNetwork(provider);
-      };
-
-      (window as any).ethereum.on('accountsChanged', handleAccountsChanged);
-      (window as any).ethereum.on('chainChanged', handleChainChanged);
-
-      return () => {
-        (window as any).ethereum.removeListener('accountsChanged', handleAccountsChanged);
-        (window as any).ethereum.removeListener('chainChanged', handleChainChanged);
-      };
-    }
-  }, [provider, checkNetwork, fetchContractData, fetchUserContribution, handleDisconnectWallet]);
-
-  useEffect(() => {
-    let intervalId: NodeJS.Timeout;
-    if (isWalletConnected && isOnCorrectNetwork && presaleContract && account) {
-      fetchContractData(); 
-      fetchUserContribution(); 
-      intervalId = setInterval(() => {
-        fetchContractData();
-        fetchUserContribution();
-      }, 30000); 
-    }
-    return () => clearInterval(intervalId);
-  }, [isWalletConnected, isOnCorrectNetwork, presaleContract, account, fetchContractData, fetchUserContribution]);
-
-  const calculateTokens = (inputEthAmount: string): string => {
-    if (!inputEthAmount || isNaN(parseFloat(inputEthAmount))) {
-      return '0';
-    }
-    const eth = parseFloat(inputEthAmount);
-    const tokens = eth * presaleRate;
-    return formatNumber(tokens, 2); 
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    if (/^\d*\.?\d*$/.test(value)) {
-      setEthAmount(value);
-      setTokensToReceive(calculateTokens(value));
-    }
-  };
-  
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopySuccess('Copied!');
-      setTimeout(() => setCopySuccess(''), 1500);
-    }, (err) => {
-      console.error('Could not copy text: ', err);
-      toast({ title: 'Copy Failed', description: 'Could not copy address.', status: 'error', duration: 2000, isClosable: true });
-    });
-  };
-
-  const handleContribute = async () => {
-    if (!isWalletConnected || !signer || !presaleContract || !provider) {
-      toast({ title: 'Error', description: 'Wallet not connected or contract not loaded.', status: 'error', duration: 3000, isClosable: true });
-      return;
-    }
-    if (!presaleActive) {
-      toast({ title: 'Presale Inactive', description: 'The presale is currently not active.', status: 'warning', duration: 3000, isClosable: true });
-      return;
-    }
-    if (emergencyStopActive) {
-      toast({ title: 'Presale Paused', description: 'The presale is temporarily paused by admin.', status: 'warning', duration: 3000, isClosable: true });
-      return;
-    }
-
-    console.log(`[Debug] contributionAmount (string input): '${contributionAmount}'`); // DEBUG - New variable
-    const amountInEth = parseFloat(contributionAmount);
-    console.log(`[Debug] amountInEth (parsed float): ${amountInEth}`); // DEBUG - New variable
-
-    if (isNaN(amountInEth) || amountInEth <= 0) {
-      toast({ title: 'Invalid Amount', description: 'Please enter a valid amount of ETH.', status: 'error', duration: 3000, isClosable: true });
-      return;
-    }
-    if (amountInEth < parseFloat(minContribution) || amountInEth > parseFloat(maxContribution)) {
-      toast({ title: 'Contribution Limit', description: `Amount must be between ${minContribution} and ${maxContribution} ETH.`, status: 'error', duration: 3000, isClosable: true });
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const tx = await presaleContract.buyTokensWithETH({ value: ethers.utils.parseEther(contributionAmount) });
-      toast({ title: 'Transaction Sent', description: 'Waiting for confirmation...', status: 'info', duration: 5000, isClosable: true });
-      await tx.wait();
-      toast({ title: 'Contribution Successful!', description: `You contributed ${contributionAmount} ETH.`, status: 'success', duration: 5000, isClosable: true });
-      fetchContractData();
-      fetchUserContribution();
-      setContributionAmount(''); // Clear the correct input state
-      setTokensToReceive('0'); // Assuming this is still relevant
-      setShowTokenAddress(true); 
-
-      // ---- ADD TOKEN TO WALLET LOGIC ----
-      if ((window as any).ethereum) {
-        try {
-          const wasAdded = await (window as any).ethereum.request({
-            method: 'wallet_watchAsset',
-            params: {
-              type: 'ERC20', // Initially only supports ERC20, but other token types may be added.
-              options: {
-                address: INFAI_TOKEN_ADDRESS, // The address of the token.
-                symbol: tokenSymbol,          // A ticker symbol or shorthand, up to 5 characters.
-                decimals: 18,                 // The number of decimals in the token.
-                image: 'https://postimg.cc/759Gk9z3', // A string url of the token logo.
-              },
-            },
-          });
-
-          if (wasAdded) {
-            toast({ title: `${tokenSymbol} Added`, description: `${tokenSymbol} has been added to your MetaMask.`, status: 'info', duration: 3000, isClosable: true });
+  // Connect wallet
+  const connectWallet = useCallback(async () => {
+    if (typeof window.ethereum !== 'undefined') {
+      setIsLoading(true); 
+      try {
+        // Use the *selected* network config for setup
+        console.log(`Attempting to connect/switch to ${selectedNetworkConfig.name}...`);
+        const networkSetupSuccess = await setupNetwork(selectedNetworkConfig);
+        if (!networkSetupSuccess) {
+          if (networkSetupSuccess === false) {
+            toast({ 
+              title: "Network Switch Rejected", 
+              description: "MetaMask rejected the network switch request. Please check MetaMask and try connecting again.", 
+              status: "warning",
+              duration: 5000,
+              isClosable: true
+            });
+            return;
           } else {
-            // User may have declined or already added it. No strong need for a toast here unless an error occurred.
-            // console.log('User chose not to add the token or it was already added.');
+            toast({ 
+              title: "Network Setup Failed", 
+              description: `Please switch to the ${selectedNetworkConfig.name} network in MetaMask.`, 
+              status: "error",
+              duration: 5000,
+              isClosable: true
+            });
           }
+          resetState(); 
+          setIsLoading(false); 
+          return;
+        }
+
+        const web3Provider = new ethers.providers.Web3Provider(window.ethereum, 'any'); 
+        await web3Provider.send('eth_requestAccounts', []); 
+
+        const network = await web3Provider.getNetwork();
+        setConnectedChainId(network.chainId); 
+        console.log(`MetaMask connected to Chain ID: ${network.chainId}`);
+
+        // Check if the connected network matches the selected one *after* setup attempt
+        if (network.chainId !== selectedNetworkConfig.chainId) {
+          toast({ 
+            title: "Incorrect Network", 
+            description: `Connected to ${network.name || 'Unknown'} (ID: ${network.chainId}), but DApp requires ${selectedNetworkConfig.name} (ID: ${selectedNetworkConfig.chainId}). Please switch network in MetaMask.`, 
+            status: "error",
+            duration: 7000,
+            isClosable: true
+          });
+          resetState(); 
+          setIsLoading(false); 
+          return;
+        }
+
+        // Network is correct, proceed
+        setProvider(web3Provider);
+        const signerInstance = web3Provider.getSigner();
+        setSigner(signerInstance);
+        const address = await signerInstance.getAddress();
+        setUserAddress(address); 
+        setIsWalletConnected(true); // Set wallet connected state
+        setIsOnCorrectNetwork(true); // Set correct network state
+        console.log('Wallet Connected:', address);
+        toast({ 
+          title: "Wallet Connected", 
+          description: `Successfully connected to ${selectedNetworkConfig.name}.`, 
+          status: "success",
+          duration: 3000,
+          isClosable: true
+        });
+
+        // Contract initialization is now handled by useEffect based on these state updates
+
+      } catch (error: any) {
+        console.error('Error connecting wallet:', error);
+        toast({ 
+          title: "Wallet Connection Error", 
+          description: `${error.message?.substring(0,100) || 'Unknown error'}`, 
+          status: "error",
+          duration: 5000,
+          isClosable: true
+        });
+        resetState(); 
+      } finally {
+        setIsLoading(false); 
+      }
+    } else {
+      toast({ 
+        title: "MetaMask Not Found", 
+        description: "Please install the MetaMask browser extension.", 
+        status: "error",
+        duration: 5000,
+        isClosable: true
+      });
+      resetState(); 
+    }
+  }, [selectedNetworkConfig, resetState, toast]);
+
+  // Disconnect wallet
+  const handleDisconnectWallet = useCallback(() => {
+    console.log("Disconnecting wallet");
+    resetState();
+    toast({ 
+      title: "Wallet Disconnected", 
+      status: "info",
+      duration: 3000,
+      isClosable: true
+    });
+  }, [resetState, toast]);
+
+  // Initialize Contracts - depends on provider, signer, userAddress, connectedChainId, and selectedNetworkConfig
+  useEffect(() => {
+    console.log(`>>> Contract Init Effect: Initializing contracts for ${selectedNetworkConfig.name}...`); // Log Init Start
+    // Only proceed if provider exists and the connected network matches the selected one
+    if (provider && signer && userAddress && connectedChainId === selectedNetworkConfig.chainId) { 
+      try {
+        console.log(`>>> Contract Init Effect: Using Presale Address: ${selectedNetworkConfig.presaleAddress}, Token Address: ${selectedNetworkConfig.tokenAddress}`); // Log Addresses
+        // Use addresses from the selected network config
+        const presale = new ethers.Contract(selectedNetworkConfig.presaleAddress, INFAIPresaleABI, signer);
+        const token = new ethers.Contract(selectedNetworkConfig.tokenAddress, INFAITokenABI, signer);
+        setPresaleContract(presale);
+        setTokenContract(token); 
+        console.log('>>> Contract Init Effect: Contracts successfully initialized.'); // Log Init Success
+        // Fetch initial data after contracts are set (will be handled by separate effects/calls later)
+
+      } catch (error: any) {
+        console.error(">>> Contract Init Effect: Error initializing contracts:", error);
+        setTokenContract(null);
+        setPresaleContract(null); 
+        toast({ 
+          title: "Contract Initialization Failed", 
+          description: `Error: ${error.message?.substring(0,100)}. Check ABI/addresses for ${selectedNetworkConfig.name}.`, 
+          status: "error",
+          duration: 7000,
+          isClosable: true
+        });
+        // Don't reset state here, provider/signer/address might still be valid, just contract failed
+      }
+    } else {
+      console.log(">>> Contract Init Effect: Skipping initialization (provider or config not ready)."); // Log Init Skip
+      // Reset contracts if dependencies are not met (e.g., network changed, user disconnected, wrong network connected)
+      // Always reset if conditions aren't met, removing the check avoids exhaustive-deps issue
+      setTokenContract(null);
+      setPresaleContract(null); 
+    }
+  }, [provider, signer, userAddress, selectedNetworkKey, selectedNetworkConfig.chainId, selectedNetworkConfig.name, selectedNetworkConfig.presaleAddress, selectedNetworkConfig.tokenAddress, connectedChainId, toast]); 
+
+  // Fetch Token Details
+  // Fetches token symbol, decimals, and user balance
+  const fetchTokenDetails = useCallback(async () => {
+    if (tokenContract && userAddress && provider) {
+      try {
+        console.log("Fetching token details...");
+        const [symbol, decimals, balance] = await Promise.all([
+          tokenContract.symbol(),
+          tokenContract.decimals(),
+          tokenContract.balanceOf(userAddress),
+        ]);
+        setTokenSymbol(symbol);
+        const fetchedDecimals = typeof decimals === 'number' ? decimals : decimals.toNumber(); // Ensure decimals is a number
+        setTokenDecimals(fetchedDecimals);
+        setTokenBalance(ethers.utils.formatUnits(balance, fetchedDecimals)); // Use fetchedDecimals
+        console.log(`Token: ${symbol}, Decimals: ${fetchedDecimals}`);
+        console.log(`User Token Balance: ${ethers.utils.formatUnits(balance, fetchedDecimals)}`);
+      } catch (error) {
+        console.error('Error fetching token details:', error);
+        toast({ title: "Error Fetching Token Details", status: "error" });
+        // Reset token specific states
+        setTokenSymbol('INFAI'); // Default
+        setTokenDecimals(18); // Default
+        setTokenBalance('0');
+      }
+    }
+  }, [tokenContract, userAddress, provider, toast]); // Removed setTokenSymbol, setTokenDecimals, setTokenBalance from deps
+
+  // Fetch Presale Static Data
+  // Fetches configuration like rate, caps, min/max contributions, and checks ownership
+  const fetchStaticData = useCallback(async () => {
+    // Check if owner only if user is connected
+    if (presaleContract && userAddress) { 
+      try {
+        console.log("Fetching presale static data..."); 
+        console.log(`Attempting to fetch static data with presaleContract: ${!!presaleContract}, userAddress: ${userAddress}`); 
+        // Fetch owner along with other static data
+        const [rate, hardCap, softCap, minContrib, maxContrib, ownerAddress, presaleActive, emergencyStop, claimsEnabled] = await Promise.all([
+          presaleContract.rate(),
+          presaleContract.hardCap(),
+          presaleContract.softCap(),
+          presaleContract.minContribution(),
+          presaleContract.maxContribution(),
+          presaleContract.owner(), // Fetch owner
+          presaleContract.presaleActive(),
+          presaleContract.emergencyStop(),
+          presaleContract.tokensClaimable()
+        ]);
+        setPresaleRate(rate.toNumber()); 
+        setHardCapEth(ethers.utils.formatEther(hardCap));
+        setSoftCapEth(ethers.utils.formatEther(softCap));
+        setSoftCapWei(softCap); // Store raw BigNumber value
+        setMinContributionEth(ethers.utils.formatEther(minContrib));
+        setMaxContributionEth(ethers.utils.formatEther(maxContrib));
+
+        // Log addresses for debugging owner check
+        console.log('Fetched Owner Address:', ownerAddress); 
+        console.log('Current User Address:', userAddress); 
+
+        // Perform case-insensitive comparison for owner check
+        const isOwnerCheck = ownerAddress.toLowerCase() === userAddress.toLowerCase();
+        setIsOwner(isOwnerCheck);
+        console.log(`Owner check result: ${isOwnerCheck}`); 
+
+        setPresaleStatus(presaleActive);
+        setEmergencyStatus(emergencyStop);
+        setClaimsEnabledStatus(claimsEnabled);
+
+        console.log('Presale Static Data:', { 
+          rate: rate.toNumber(),
+          hardCap: ethers.utils.formatEther(hardCap) + ' ETH',
+          softCap: ethers.utils.formatEther(softCap) + ' ETH',
+          minContribution: ethers.utils.formatEther(minContrib) + ' ETH',
+          maxContribution: ethers.utils.formatEther(maxContrib) + ' ETH',
+          // tokensSold: Will be logged in dynamic data fetch
+        });
+      } catch (error: any) {
+        console.error('Error fetching presale static data:', error); 
+        console.log(`Error details: ${error.message}`); 
+        toast({ title: "Error Fetching Presale Config", status: "error" });
+        setPresaleRate(0); // Default
+        setHardCapEth('0');
+        setSoftCapEth('0');
+        setSoftCapWei(ethers.BigNumber.from(0)); // Reset Wei value
+        setMinContributionEth('0');
+        setMaxContributionEth('0');
+        setPresaleStatus(false);
+        setEmergencyStatus(false);
+        setClaimsEnabledStatus(false);
+        setIsOwner(false); // Reset owner status on error
+      }
+    }
+    // Reset owner status if contract or userAddress is not available
+    else if (!userAddress) { 
+        console.log("fetchStaticData skipped: userAddress not available."); 
+        setIsOwner(false);
+    } else if (!presaleContract) {
+        console.log("fetchStaticData skipped: presaleContract not available."); 
+        setIsOwner(false);
+    }
+  }, [presaleContract, toast, userAddress]); // Added userAddress dependency
+
+  // Fetch Presale Dynamic Data
+  // Fetches changing data like total raised and presale status
+  const fetchDynamicData = useCallback(async () => {
+    // Need presaleRate and tokenDecimals for calculation
+    if (presaleContract && presaleRate > 0 && tokenDecimals > 0) { 
+        try {
+            console.log("Fetching presale dynamic data...");
+            // Fetch dynamic values (like total raised, maybe contract balance)
+            const fetchedTotalRaised = await presaleContract.totalRaised();
+            setTotalRaisedWei(fetchedTotalRaised);
+            
+            // Format for display if needed elsewhere (or keep as BigNumber for comparisons)
+            setTotalContributedEth(ethers.utils.formatEther(fetchedTotalRaised)); 
+
+            const dynamicData = {
+              totalRaised: ethers.utils.formatEther(fetchedTotalRaised) + ` ${selectedNetworkConfig?.nativeCurrency.symbol || 'ETH'} / ${hardCapEth} ${selectedNetworkConfig?.nativeCurrency.symbol || 'ETH'} `,
+              totalRaisedRaw: fetchedTotalRaised.toString()
+            };
+            console.log('Presale Dynamic Data:', dynamicData);
+
+            // Assume claims are active if presale is NOT active.
+            // A dedicated view function in the contract (e.g., isClaimActive()) would be better.
+            setIsClaimActive(!presaleActive); 
+            // const canClaimGlobally = await presaleContract.claimActive(); // Removed - No such function
+            // setIsClaimActive(canClaimGlobally);
+
+            console.log('Presale Dynamic Data:', {
+                totalContributed: ethers.utils.formatEther(fetchedTotalRaised) + ' ETH',
+                isActive: presaleActive,
+                isClaimActive: !presaleActive, // Log the calculated claim status
+                tokensSoldCalculated: tokensSold + ' ' + tokenSymbol,
+            });
+
         } catch (error) {
-          console.error('Failed to add token to MetaMask:', error);
-          // Don't show a toast for this error as it might be intrusive if they decline or if there's a minor issue.
-          // toast({ title: 'Add Token Failed', description: `Could not add ${tokenSymbol} to MetaMask. You can add it manually.`, status: 'warning', duration: 3000, isClosable: true });
+            console.error('Error fetching presale dynamic data:', error);
+            toast({ 
+               title: "Error Fetching Presale Status", 
+               description: "Could not retrieve presale status. Check console.",
+               status: "error",
+               duration: 3000,
+               isClosable: true
+            });
+            setTotalRaisedWei(ethers.BigNumber.from(0));
+            setTotalContributedEth('0');
+            setPresaleActive(false);
+            setIsClaimActive(false); 
+            setTokensSold('0'); // Reset tokensSold on error
+        }
+    }
+    else {
+        // Reset if contract or necessary calculation inputs (rate, decimals) are missing/zero
+        setTotalRaisedWei(ethers.BigNumber.from(0));
+        setTotalContributedEth('0');
+        setPresaleActive(false);
+        setIsClaimActive(false); 
+        setTokensSold('0'); 
+    }
+  // Dependencies now include presaleRate and tokenDecimals needed for calculation
+  }, [presaleContract, toast, presaleRate, tokenDecimals, tokenSymbol]); 
+
+  // Fetch User-Specific Data
+  // Fetches user's balance, contribution, and claimed status
+  const fetchUserData = useCallback(async () => {
+    // Need presaleRate and tokenDecimals for claimable calculation
+    if (presaleContract && userAddress && provider && presaleRate > 0 && tokenDecimals > 0) { 
+      try {
+        console.log("Fetching user-specific data...");
+        // Remove calculateTokens from Promise.all, calculate below
+        const [ethBal, contributionBigNum, claimedStatus] = await Promise.all([
+          provider.getBalance(userAddress),
+          presaleContract.contributions(userAddress), 
+          presaleContract.claimed(userAddress), // Correct function name
+          // presaleContract.calculateTokens(userAddress) // Removed - No such function
+        ]);
+
+        setUserEthBalance(ethers.utils.formatEther(ethBal));
+        setUserContribution(ethers.utils.formatEther(contributionBigNum) + ` ${selectedNetworkConfig?.nativeCurrency.symbol || 'ETH'}`);
+        setUserContributionWei(contributionBigNum); // Store raw contribution
+        setHasClaimed(claimedStatus); // Use the result from 'claimed'
+
+        // Calculate claimable tokens: contribution * rate
+        let claimableBigNum = ethers.BigNumber.from(0);
+        if (contributionBigNum.gt(0) && presaleRate > 0) {
+          claimableBigNum = contributionBigNum.mul(presaleRate);
+        }
+        setTokensClaimable(ethers.utils.formatUnits(claimableBigNum, tokenDecimals) + ` ${tokenSymbol || 'Tokens'}`);
+
+        const userData = {
+          ethBalance: ethers.utils.formatEther(ethBal) + ` ${selectedNetworkConfig?.nativeCurrency.symbol || 'ETH'}`, 
+          contribution: ethers.utils.formatEther(contributionBigNum) + ` ${selectedNetworkConfig?.nativeCurrency.symbol || 'ETH'}`,
+          contributionWei: contributionBigNum.toString(), // Log raw contribution
+          hasClaimed: claimedStatus, 
+          tokensClaimable: ethers.utils.formatUnits(claimableBigNum, tokenDecimals) + ` ${tokenSymbol || 'Tokens'}`
+        };
+        console.log('User Data:', userData);
+
+      } catch (error) {
+        console.error("Error fetching user data:", error);
+        // Reset user specific states on error
+        setUserEthBalance('0');
+        setUserTokenBalance('0');
+        setUserContribution('0 ETH');
+        setUserContributionWei(ethers.BigNumber.from(0));
+        setTokensClaimable('0');
+        setHasClaimed(false);
+      }
+    }
+  // Dependencies now include presaleRate for calculation
+  }, [presaleContract, userAddress, provider, toast, tokenDecimals, selectedNetworkConfig, tokenSymbol, presaleRate]); 
+
+  // Calculate tokens to receive based on ETH input
+  useEffect(() => {
+    if (contributionAmount && presaleRate > 0 && tokenDecimals > 0) {
+      try {
+        const amountInWei = ethers.utils.parseEther(contributionAmount);
+        const tokens = amountInWei.mul(presaleRate); // This will be a BigNumber representing the smallest unit of the token
+        // Format it using tokenDecimals
+        setTokensToReceive(ethers.utils.formatUnits(tokens, tokenDecimals)); 
+      } catch (error) {
+        // Handle invalid input for parseEther (e.g., non-numeric)
+        setTokensToReceive('0'); 
+      }
+    } else {
+      setTokensToReceive('0');
+    }
+  }, [contributionAmount, presaleRate, tokenDecimals]); // Added tokenDecimals
+
+  // Effect to fetch token details when contract, user, or provider changes
+  useEffect(() => {
+    if (isWalletConnected && isOnCorrectNetwork) {
+      fetchTokenDetails();
+    }
+  }, [fetchTokenDetails, isWalletConnected, isOnCorrectNetwork]); // Dependencies include the useCallback function itself
+
+  // Effect to fetch static presale data when contract or relevant display info (decimals, symbol) changes
+  useEffect(() => {
+    if (isWalletConnected && isOnCorrectNetwork) {
+      fetchStaticData();
+    }
+  }, [fetchStaticData, isWalletConnected, isOnCorrectNetwork]);
+
+  // Effect for periodic data refresh of dynamic data (total raised, presale status)
+  useEffect(() => {
+    if (isWalletConnected && isOnCorrectNetwork) {
+      fetchDynamicData(); // Initial fetch
+      const dynamicDataInterval = setInterval(fetchDynamicData, 15000); // Refresh every 15 seconds
+      return () => clearInterval(dynamicDataInterval); // Cleanup interval
+    }
+  }, [fetchDynamicData, isWalletConnected, isOnCorrectNetwork]);
+
+  // Effect for periodic data refresh of user-specific data
+  useEffect(() => {
+    if (isWalletConnected && isOnCorrectNetwork) {
+      fetchUserData(); // Initial fetch
+      const userDataInterval = setInterval(fetchUserData, 10000); // Refresh every 10 seconds
+      return () => clearInterval(userDataInterval); // Cleanup interval
+    }
+  }, [fetchUserData, isWalletConnected, isOnCorrectNetwork]);
+
+
+  // MetaMask Event Listeners
+  useEffect(() => {
+    if (!window.ethereum) return; 
+
+    const handleAccountsChanged = (accounts: string[]) => {
+      if (accounts.length === 0) {
+        console.log('MetaMask account disconnected');
+        toast({ title: "Wallet Disconnected", status: "info", duration: 3000, isClosable: true });
+        resetState();
+      } else if (accounts[0].toLowerCase() !== userAddress?.toLowerCase()) { 
+        console.log('MetaMask account changed:', accounts[0]);
+        toast({ title: "Account Changed", description: "Reconnecting with new account...", status: "info", duration: 3000, isClosable: true });
+        // Reset state before reconnecting with new account
+        resetState(); 
+        // Re-trigger connection flow with the new account
+        connectWallet(); 
+      }
+    };
+
+    const handleChainChanged = (chainIdHex: string) => {
+      const newChainId = parseInt(chainIdHex, 16);
+      console.log('MetaMask network changed to Chain ID:', newChainId);
+      setConnectedChainId(newChainId); 
+
+      if (newChainId !== selectedNetworkConfig.chainId) {
+        setIsOnCorrectNetwork(false); // Set incorrect network
+        toast({ 
+          title: "Network Changed in MetaMask", 
+          description: `Switched to network ID ${newChainId}. DApp requires ${selectedNetworkConfig.name} (ID: ${selectedNetworkConfig.chainId}). Please switch back or select the correct network in the DApp.`,
+          status: "warning",
+          duration: 7000,
+          isClosable: true
+        });
+        // Don't reset state automatically, user might switch back.
+        // Contract interactions will fail anyway due to the useEffect dependency check.
+        // Explicitly clear contracts to be safe
+        setPresaleContract(null);
+        setTokenContract(null); 
+      } else {
+        setIsOnCorrectNetwork(true); // Set correct network
+        // Network now matches the selected one, maybe re-initiate connection/data fetch?
+        console.log("MetaMask network now matches selected network.");
+        toast({ 
+          title: "Network Matched", 
+          description: `Switched back to ${selectedNetworkConfig.name}. Re-initializing...`, 
+          status: "info",
+          duration: 3000,
+          isClosable: true
+        });
+        // If not connected, try connecting now. Otherwise, useEffect will handle re-init.
+        if (!userAddress) { 
+          connectWallet();
+        } else {
+          // If already connected, useEffect for contracts should re-run and fetch data
         }
       }
-      // ---- END ADD TOKEN TO WALLET LOGIC ----
+    };
 
-    } catch (error: any) {
-      console.error('Contribution error:', error);
-      const errorMessage = error.reason || error.message || 'Transaction failed.';
-      toast({ title: 'Contribution Failed', description: errorMessage, status: 'error', duration: 5000, isClosable: true });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const renderMainContent = () => {
-    if (isWalletConnected && !isOnCorrectNetwork) {
-      return (
-        <Alert status="error" mt={4} mb={4}>
-          <AlertIcon />
-          <Box flex="1">
-            <Text fontWeight="bold">Wrong Network</Text>
-            <Text>Please switch to the Infinaeon network in your wallet to interact with the presale.</Text>
-          </Box>
-          <Button 
-            colorScheme="orange" 
-            size="sm" 
-            onClick={async () => await switchToInfinaeonNetwork((window as any).ethereum)}
-          >
-            Switch to Infinaeon
-          </Button>
-        </Alert>
-      );
-    }
-
-    if (isWalletConnected && isOnCorrectNetwork) {
-      return (
-        <VStack spacing={6} align="stretch" mt={4}>
-          <Text textAlign="center" fontSize="lg">Your Wallet: {truncateAddress(account || '')}</Text>
-
-          <Box p={5} borderWidth="1px" borderRadius="lg" shadow="md">
-            <Heading size="md" mb={5} textAlign="center">Join the {tokenSymbol} Presale!</Heading>
-            
-            <VStack spacing={3} align="stretch" mb={5}>
-              <HStack justifyContent="space-between">
-                <Text>Total Raised:</Text>
-                <Text fontWeight="bold">{formatNumber(totalRaised)} ETH / {formatNumber(maxCap)} ETH</Text>
-              </HStack>
-              <Progress 
-                value={(parseFloat(maxCap) > 0 ? (parseFloat(totalRaised) / parseFloat(maxCap)) * 100 : 0)} 
-                size="md" 
-                colorScheme="green" 
-                borderRadius="md"
-                isAnimated
-                hasStripe
-              />
-              <HStack justifyContent="space-between">
-                <Text>Tokens Sold:</Text>
-                <Text fontWeight="bold">{formatNumber(tokensSold)} {tokenSymbol}</Text>
-              </HStack>
-              <HStack justifyContent="space-between">
-                <Text>Your Contribution:</Text>
-                <Text fontWeight="bold">{formatNumber(userContribution)} ETH</Text>
-              </HStack>
-            </VStack>
-
-            <VStack spacing={4} align="stretch" mt={6}>
-              <Text fontSize="md" fontWeight="semibold">Rate: 1 ETH = {formatNumber(presaleRate, 0)} {tokenSymbol}</Text>
-              <Text fontSize="sm">Min Contribution: {formatNumber(minContribution)} ETH</Text>
-              <Text fontSize="sm">Max Contribution: {formatNumber(maxContribution)} ETH</Text>
-              
-              <Flex 
-                mt={3} 
-                direction={{ base: 'column', md: 'row' }} // Stack on mobile, row on md and up
-                alignItems={{ base: 'stretch', md: 'center' }} // Stretch items on mobile for full width input/button
-              >
-                <Input
-                  placeholder={`Enter ETH (Min ${formatNumber(minContribution)})`}
-                  value={contributionAmount}
-                  onChange={handleContributionAmountChange}
-                  type="number"
-                  mr={{ base: 0, md: 3 }} // Margin right only on desktop
-                  mb={{ base: 3, md: 0 }} // Margin bottom only on mobile
-                  focusBorderColor="teal.500"
-                />
-                <Button
-                  colorScheme="teal"
-                  onClick={handleContribute}
-                  isLoading={isContributing}
-                  disabled={isContributing || !presaleActive || emergencyStopActive || parseFloat(contributionAmount) <= 0 || parseFloat(contributionAmount) < parseFloat(minContribution) || parseFloat(contributionAmount) > parseFloat(maxContribution)}
-                  width={{ base: '100%', md: 'auto' }} // Full width on mobile, auto on desktop
-                >
-                  Contribute
-                </Button>
-              </Flex>
-              {parseFloat(contributionAmount) > 0 && presaleRate > 0 && (
-                <Text fontSize="xs" mt={1} textAlign="right" color="gray.600">
-                  You will receive approx: {formatNumber(parseFloat(contributionAmount) * presaleRate, 2)} {tokenSymbol}
-                </Text>
-              )}
-              {emergencyStopActive && <Text color="red.500" textAlign="center" fontWeight="bold" mt={2}>Contributions are temporarily paused.</Text>}
-            </VStack>
-          </Box>
-
-          {/* Token Claim Section - Shown if claim is active, presale ended, and user contributed */}
-          {isClaimActive && !presaleActive && parseFloat(userContribution) > 0 && (
-            <Box p={5} borderWidth="1px" borderRadius="lg" shadow="md" mt={6}>
-              <Heading size="md" mb={4} textAlign="center">Claim Your {tokenSymbol} Tokens</Heading>
-              <Text textAlign="center" mb={3}>You can claim: {formatNumber(tokensClaimable)} {tokenSymbol}</Text>
-              <Button 
-                colorScheme="blue" 
-                onClick={handleContribute} 
-                isLoading={isClaiming} 
-                width="100%"
-                disabled={isClaiming || parseFloat(tokensClaimable) <= 0}
-              >
-                Claim Tokens
-              </Button>
-            </Box>
-          )}
-        </VStack>
-      );
-    }
-
-    return (
-      <Button onClick={connectWallet} isLoading={isConnecting} colorScheme="orange" width="100%" mt={4}>
-        Connect Wallet
-      </Button>
-    );
-  };
-
-  // Admin Panel Handlers (Implement actual contract calls)
-  const handleAdminSetRate = async () => {
-    if (!presaleContract || !signer || !adminNewRate) return;
-    setLoading(true);
-    try {
-      const tx = await presaleContract.setRate(ethers.utils.parseUnits(adminNewRate, 0)); // Assuming rate is an integer without decimals (tokens per ETH)
-      await tx.wait();
-      toast({ title: 'Admin Action', description: 'Rate updated successfully!', status: 'success', duration: 3000, isClosable: true });
-      fetchContractData();
-      setAdminNewRate('');
-    } catch (error: any) {
-      console.error('Error setting rate:', error);
-      toast({ title: 'Admin Error', description: error?.data?.message || error.message || 'Failed to set rate.', status: 'error', duration: 5000, isClosable: true });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAdminSetMinMaxContribution = async () => {
-    if (!presaleContract || !signer || !adminNewMinContribution || !adminNewMaxContribution) return;
-    setLoading(true);
-    try {
-      // The ABI does not appear to have a function to set Min/Max contribution.
-      // const tx = await presaleContract.setMinMaxContribution(ethers.utils.parseEther(adminNewMinContribution), ethers.utils.parseEther(adminNewMaxContribution));
-      // await tx.wait();
-      // toast({ title: 'Admin Action', description: 'Min/Max contribution updated successfully!', status: 'success', duration: 3000, isClosable: true });
-      // fetchContractData();
-      // setAdminNewMinContribution('');
-      // setAdminNewMaxContribution('');
-      toast({ title: 'Feature Not Available', description: 'The smart contract does not support changing Min/Max contribution limits after deployment.', status: 'warning', duration: 5000, isClosable: true });
-    } catch (error: any) {
-      console.error('Error setting min/max contribution:', error);
-      toast({ title: 'Admin Error', description: error?.data?.message || error.message || 'Failed to set Min/Max contribution.', status: 'error', duration: 5000, isClosable: true });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAdminSetMaxCap = async () => {
-    if (!presaleContract || !signer || !adminNewMaxCap) return;
-    setLoading(true);
-    try {
-      // The ABI does not appear to have a function to set Hard Cap.
-      // const tx = await presaleContract.setHardCap(ethers.utils.parseEther(adminNewMaxCap)); // Assuming contract function is setHardCap
-      // await tx.wait();
-      // toast({ title: 'Admin Action', description: 'Max cap updated successfully!', status: 'success', duration: 3000, isClosable: true });
-      // fetchContractData();
-      // setAdminNewMaxCap('');
-      toast({ title: 'Feature Not Available', description: 'The smart contract does not support changing the Max Cap after deployment.', status: 'warning', duration: 5000, isClosable: true });
-    } catch (error: any) {
-      console.error('Error setting max cap:', error);
-      toast({ title: 'Admin Error', description: error?.data?.message || error.message || 'Failed to set max cap.', status: 'error', duration: 5000, isClosable: true });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAdminTogglePresaleStatus = async () => {
-    if (!presaleContract || !signer) return;
-    setLoading(true);
-    try {
-      const tx = await presaleContract.togglePresale(); // Corrected function name
-      await tx.wait();
-      toast({ title: 'Admin Action', description: 'Presale status toggled successfully!', status: 'success', duration: 3000, isClosable: true });
-      fetchContractData();
-    } catch (error: any) {
-      console.error('Error toggling presale status:', error);
-      toast({ title: 'Admin Error', description: error?.data?.message || error.message || 'Failed to toggle presale status.', status: 'error', duration: 5000, isClosable: true });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAdminToggleClaimStatus = async () => {
-    if (!presaleContract || !signer) return;
-    setLoading(true);
-    try {
-      // ABI has enableTokenClaims(). No direct toggle or disable.
-      // This will attempt to enable claims. If already enabled, behavior depends on contract.
-      if (!isClaimActive) { // Only attempt to enable if not already active based on UI state
-        const tx = await presaleContract.enableTokenClaims(); // Corrected function name
-        await tx.wait();
-        toast({ title: 'Admin Action', description: 'Token claims enabled successfully!', status: 'success', duration: 3000, isClosable: true });
-        fetchContractData(); // Refresh data to update isClaimActive state
-      } else {
-        toast({ title: 'Admin Info', description: 'Claims are already active. Contract does not support disabling claims via this function.', status: 'info', duration: 5000, isClosable: true });
+    // Subscribe
+    window.ethereum.on('accountsChanged', handleAccountsChanged);
+    window.ethereum.on('chainChanged', handleChainChanged);
+    
+    // Cleanup function
+    return () => {
+      if (window.ethereum?.removeListener) {
+        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+        window.ethereum.removeListener('chainChanged', handleChainChanged);
       }
-    } catch (error: any) {
-      console.error('Error managing claim status:', error);
-      toast({ title: 'Admin Error', description: error?.data?.message || error.message || 'Failed to manage claim status.', status: 'error', duration: 5000, isClosable: true });
-    } finally {
-      setLoading(false);
+    };
+  }, [userAddress, resetState, selectedNetworkConfig, connectWallet, toast]); 
+
+  const handleNetworkSelectChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const newNetworkKey = event.target.value as keyof typeof NETWORKS;
+    setSelectedNetworkKey(newNetworkKey);
+    console.log(`Network selection changed to: ${NETWORKS[newNetworkKey].name}`);
+    
+    // Reset wallet connection and contract state as network context has changed
+    // Disconnecting wallet will trigger re-evaluation of effects
+    if (isWalletConnected) {
+      handleDisconnectWallet(); // Disconnect to force re-init on new network context
+    }
+    resetState(); // Clear data
+
+    // Attempt to switch network in MetaMask
+    const switched = await setupNetwork(NETWORKS[newNetworkKey]);
+    if (switched) {
+        toast({
+            title: `Switched to ${NETWORKS[newNetworkKey].name}`, 
+            description: "Please reconnect your wallet if previously connected.",
+            status: "info",
+            duration: 4000,
+            isClosable: true
+        });
+    } else {
+        toast({
+            title: `Failed to switch to ${NETWORKS[newNetworkKey].name}`, 
+            description: "Please switch manually in MetaMask.",
+            status: "warning",
+            duration: 4000,
+            isClosable: true
+        });
     }
   };
 
-  const handleAdminWithdrawFunds = async () => {
-    if (!presaleContract || !signer) return;
-    setLoading(true);
+  const handleContribute = useCallback(async () => {
+    if (!presaleContract || !signer || !provider) {
+      toast({ title: "Connection Error", description: "Wallet or contract not connected.", status: "error" });
+      return;
+    }
+    if (!contributionAmount || isNaN(parseFloat(contributionAmount)) || parseFloat(contributionAmount) <= 0) {
+       toast({ title: "Invalid Amount", description: "Please enter a valid contribution amount.", status: "warning" });
+       return;
+    }
+
+    setIsTxLoading(true); // Set loading state
     try {
-      const tx = await presaleContract.withdrawFunds(); 
-      await tx.wait();
-      toast({ title: 'Admin Action', description: 'Funds withdrawn successfully!', status: 'success', duration: 3000, isClosable: true });
-      fetchContractData();
-    } catch (error: any) {
-      console.error('Error withdrawing funds:', error);
-      toast({ title: 'Admin Error', description: error?.data?.message || error.message || 'Failed to withdraw funds.', status: 'error', duration: 5000, isClosable: true });
-    } finally {
-      setLoading(false);
-    }
-  };
+      const amountInWei = ethers.utils.parseEther(contributionAmount);
+      
+      // Validate against min/max contribution limits (fetched previously)
+      const minContribWei = ethers.utils.parseEther(minContributionEth || '0');
+      const maxContribWei = ethers.utils.parseEther(maxContributionEth || '0'); 
 
-  const handleAdminToggleEmergencyStop = async () => {
-    if (!presaleContract || !signer) return;
-    setLoading(true);
+      if (amountInWei.lt(minContribWei)) {
+         throw new Error(`Contribution must be at least ${minContributionEth} ETH`);
+      }
+      if (maxContribWei.gt(0) && amountInWei.gt(maxContribWei)) { // Check max only if it's > 0
+         throw new Error(`Contribution cannot exceed ${maxContributionEth} ETH`);
+      }
+      
+      console.log(`Attempting contribution of ${contributionAmount} ETH (${amountInWei.toString()} wei)...`);
+
+      // Connect signer for transaction
+      const tx = await presaleContract.connect(signer).buyTokensWithETH({ value: amountInWei });
+
+      toast({ title: "Transaction Sent", description: "Waiting for confirmation...", status: "info" });
+      console.log('Transaction sent:', tx.hash);
+
+      const receipt = await tx.wait(); // Wait for confirmation
+
+      console.log('Transaction confirmed:', receipt);
+      toast({ title: "Contribution Successful!", description: `Contributed ${contributionAmount} ETH. Tx: ${receipt.transactionHash.substring(0, 10)}...`, status: "success" });
+
+      // Refresh data after successful contribution
+      fetchDynamicData();
+      fetchUserData();
+      setContributionAmount(''); // Clear input field
+
+    } catch (error: any) {
+      console.error('Contribution failed:', error);
+      // Attempt to parse RPC errors for better messages
+      const reason = error.reason || error.data?.message || error.message || "An unknown error occurred.";
+      toast({ 
+          title: "Contribution Failed", 
+          description: reason,
+          status: "error",
+          duration: 5000, // Keep error visible longer
+          isClosable: true 
+      });
+    } finally {
+      setIsTxLoading(false); // Reset loading state
+    }
+  }, [presaleContract, signer, provider, contributionAmount, toast, fetchDynamicData, fetchUserData, minContributionEth, maxContributionEth]); // Added dependencies
+
+  const handleSetRate = useCallback(async () => {
+    if (!presaleContract || !signer || !provider || !isOwner) {
+      toast({ title: "Permission Denied or Connection Error", status: "error" });
+      return;
+    }
+    if (!adminNewRate || isNaN(parseInt(adminNewRate)) || parseInt(adminNewRate) <= 0) {
+       toast({ title: "Invalid Rate", description: "Please enter a valid positive number for the rate.", status: "warning" });
+       return;
+    }
+
+    setIsTxLoading(true);
     try {
-      const tx = await presaleContract.toggleEmergencyStop(); // Assuming this function exists
-      await tx.wait();
-      toast({ title: 'Admin Action', description: 'Emergency stop status toggled successfully!', status: 'success', duration: 3000, isClosable: true });
-      fetchContractData();
-    } catch (error: any) {
-      console.error('Error toggling emergency stop:', error);
-      toast({ title: 'Admin Error', description: error?.data?.message || error.message || 'Failed to toggle emergency stop.', status: 'error', duration: 5000, isClosable: true });
-    } finally {
-      setLoading(false);
-    }
-  };
+      const newRate = parseInt(adminNewRate); // Assuming rate is uint256, ethers handles number conversion
+      console.log(`Attempting to set rate to ${newRate}...`);
 
-  // Main component render
+      const tx = await presaleContract.connect(signer).setRate(newRate);
+
+      toast({ title: "Transaction Sent", description: "Setting new rate...", status: "info" });
+      console.log('Set Rate transaction sent:', tx.hash);
+
+      const receipt = await tx.wait();
+
+      console.log('Set Rate transaction confirmed:', receipt);
+      toast({ title: "Rate Updated Successfully!", status: "success" });
+
+      // Refresh static data to reflect the new rate
+      fetchStaticData();
+      setAdminNewRate(''); // Clear input
+
+    } catch (error: any) {
+      console.error('Set Rate failed:', error);
+      const reason = error.reason || error.data?.message || error.message || "Failed to set rate.";
+      toast({ title: "Set Rate Failed", description: reason, status: "error" });
+    } finally {
+      setIsTxLoading(false);
+    }
+  }, [presaleContract, signer, provider, isOwner, adminNewRate, toast, fetchStaticData]);
+
+  const handleTogglePresale = useCallback(async () => {
+    if (!presaleContract || !signer || !provider || !isOwner) {
+      toast({ title: "Permission Denied or Connection Error", status: "error" });
+      return;
+    }
+    setIsTxLoading(true);
+    const action = presaleStatus ? "Stopping" : "Starting";
+    try {
+      console.log(`Attempting to ${action.toLowerCase()} presale...`);
+      const tx = await presaleContract.connect(signer).togglePresale();
+      toast({ title: "Transaction Sent", description: `${action} presale...`, status: "info" });
+      const receipt = await tx.wait();
+      console.log('Toggle Presale transaction confirmed:', receipt);
+      toast({ title: `Presale ${action === "Starting" ? "Started" : "Stopped"}!`, status: "success" });
+      fetchStaticData(); // Refresh status
+    } catch (error: any) {
+      console.error('Toggle Presale failed:', error);
+      const reason = error.reason || error.data?.message || error.message || `Failed to ${action.toLowerCase()} presale.`;
+      toast({ title: "Toggle Presale Failed", description: reason, status: "error" });
+    } finally {
+      setIsTxLoading(false);
+    }
+  }, [presaleContract, signer, provider, isOwner, presaleStatus, toast, fetchStaticData]);
+
+  const handleToggleEmergencyStop = useCallback(async () => {
+    if (!presaleContract || !signer || !provider || !isOwner) {
+      toast({ title: "Permission Denied or Connection Error", status: "error" });
+      return;
+    }
+    setIsTxLoading(true);
+    const action = emergencyStatus ? "Disabling" : "Enabling";
+    try {
+      console.log(`Attempting to ${action.toLowerCase()} emergency stop...`);
+      const tx = await presaleContract.connect(signer).toggleEmergencyStop();
+      toast({ title: "Transaction Sent", description: `${action} emergency stop...`, status: "info" });
+      const receipt = await tx.wait();
+      console.log('Toggle Emergency Stop transaction confirmed:', receipt);
+      toast({ title: `Emergency Stop ${action === "Enabling" ? "Enabled" : "Disabled"}!`, status: "success" });
+      fetchStaticData(); // Refresh status
+    } catch (error: any) {
+      console.error('Toggle Emergency Stop failed:', error);
+      const reason = error.reason || error.data?.message || error.message || `Failed to ${action.toLowerCase()} emergency stop.`;
+      toast({ title: "Toggle Emergency Stop Failed", description: reason, status: "error" });
+    } finally {
+      setIsTxLoading(false);
+    }
+  }, [presaleContract, signer, provider, isOwner, emergencyStatus, toast, fetchStaticData]);
+
+  const handleEnableTokenClaims = useCallback(async () => {
+    if (!presaleContract || !signer || !provider || !isOwner) {
+      toast({ title: "Permission Denied or Connection Error", status: "error" });
+      return;
+    }
+    if (claimsEnabledStatus) {
+      toast({ title: "Already Enabled", description: "Token claims are already enabled.", status: "info" });
+      return;
+    }
+    setIsTxLoading(true);
+    try {
+      console.log(`Attempting to enable token claims...`);
+      const tx = await presaleContract.connect(signer).enableTokenClaims();
+      toast({ title: "Transaction Sent", description: `Enabling token claims...`, status: "info" });
+      const receipt = await tx.wait();
+      console.log('Enable Token Claims transaction confirmed:', receipt);
+      toast({ title: `Token Claims Enabled!`, status: "success" });
+      fetchStaticData(); // Refresh status
+    } catch (error: any) {
+      console.error('Enable Token Claims failed:', error);
+      // Check for specific reasons if possible (e.g., soft cap not reached, presale still active)
+      const reason = error.reason || error.data?.message || error.message || `Failed to enable token claims.`;
+      toast({ title: "Enable Claims Failed", description: reason, status: "error" });
+    } finally {
+      setIsTxLoading(false);
+    }
+  }, [presaleContract, signer, provider, isOwner, claimsEnabledStatus, toast, fetchStaticData]);
+
+  const handleWithdrawFunds = useCallback(async () => {
+    if (!presaleContract || !signer || !provider || !isOwner) {
+      toast({ title: "Permission Denied or Connection Error", status: "error" });
+      return;
+    }
+    // Optional: Add check if claimsEnabledStatus is true and totalRaised >= softCap based on contract logic?
+    
+    setIsTxLoading(true);
+    try {
+      console.log(`Attempting to withdraw funds...`);
+      const tx = await presaleContract.connect(signer).withdrawFunds();
+      toast({ title: "Transaction Sent", description: `Withdrawing funds...`, status: "info" });
+      const receipt = await tx.wait();
+      console.log('Withdraw Funds transaction confirmed:', receipt);
+      toast({ title: `Funds Withdrawn Successfully!`, status: "success" });
+      fetchStaticData(); // Refresh static data (like totalRaised if needed)
+      fetchDynamicData(); // Refresh dynamic data (like contract balance)
+    } catch (error: any) {
+      console.error('Withdraw Funds failed:', error);
+      const reason = error.reason || error.data?.message || error.message || `Failed to withdraw funds.`;
+      toast({ title: "Withdrawal Failed", description: reason, status: "error" });
+    } finally {
+      setIsTxLoading(false);
+    }
+  }, [presaleContract, signer, provider, isOwner, toast, fetchStaticData, fetchDynamicData]);
+
+
+  // --- User Action Handlers ---
+
+  const handleClaimTokens = useCallback(async () => {
+    if (!presaleContract || !signer || !provider || !userAddress) {
+      toast({ title: "Connection Error", description: "Please connect your wallet.", status: "error" });
+      return;
+    }
+    // Add checks: presale ended? claims enabled? user has claimable tokens? user hasn't claimed?
+    if (presaleStatus) {
+      toast({ title: "Presale Active", description: "Cannot claim tokens until the presale ends.", status: "warning" });
+      return;
+    }
+    if (!claimsEnabledStatus) {
+      toast({ title: "Claims Not Enabled", description: "Token claims are not yet enabled by the owner.", status: "warning" });
+      return;
+    }
+    if (userContributionWei.lte(0)) {
+      toast({ title: "No Contribution", description: "You did not contribute to this presale.", status: "info" });
+      return;
+    }
+    if (hasClaimed) {
+      toast({ title: "Already Claimed", description: "You have already claimed your tokens.", status: "info" });
+      return;
+    }
+
+    setIsTxLoading(true);
+    try {
+      console.log("Attempting to claim tokens...");
+      const tx = await presaleContract.connect(signer).claimTokens();
+      toast({ title: "Transaction Sent", description: "Claiming your tokens...", status: "info" });
+      const receipt = await tx.wait();
+      console.log('Claim Tokens transaction confirmed:', receipt);
+      toast({ title: "Tokens Claimed Successfully!", status: "success" });
+      fetchUserData(); // Refresh user balance and claim status
+    } catch (error: any) {
+      console.error('Claim Tokens failed:', error);
+      const reason = error.reason || error.data?.message || error.message || "Failed to claim tokens.";
+      toast({ title: "Claim Tokens Failed", description: reason, status: "error" });
+    } finally {
+      setIsTxLoading(false);
+    }
+  }, [presaleContract, signer, provider, userAddress, userContributionWei, hasClaimed, presaleStatus, claimsEnabledStatus, toast, fetchUserData]);
+
+  const handleClaimRefund = useCallback(async () => {
+    if (!presaleContract || !signer || !provider || !userAddress) {
+      toast({ title: "Connection Error", description: "Please connect your wallet.", status: "error" });
+      return;
+    }
+    // Add checks: presale ended? soft cap NOT met? user contributed? user hasn't refunded (implied by contribution > 0)?
+    if (presaleStatus) {
+      toast({ title: "Presale Active", description: "Cannot claim refund until the presale ends.", status: "warning" });
+      return;
+    }
+    if (totalRaisedWei.gte(softCapWei)) {
+      toast({ title: "Soft Cap Met", description: "Refunds are not available as the soft cap was met.", status: "info" });
+      return;
+    }
+    if (userContributionWei.lte(0)) {
+      toast({ title: "No Contribution", description: "You did not contribute, so no refund is available.", status: "info" });
+      return;
+    }
+
+    setIsTxLoading(true);
+    try {
+      console.log("Attempting to claim refund...");
+      const tx = await presaleContract.connect(signer).claimRefund();
+      toast({ title: "Transaction Sent", description: "Processing your refund...", status: "info" });
+      const receipt = await tx.wait();
+      console.log('Claim Refund transaction confirmed:', receipt);
+      toast({ title: "Refund Claimed Successfully!", status: "success" });
+      fetchUserData(); // Refresh user balance and contribution status
+    } catch (error: any) {
+      console.error('Claim Refund failed:', error);
+      const reason = error.reason || error.data?.message || error.message || "Failed to claim refund.";
+      toast({ title: "Refund Failed", description: reason, status: "error" });
+    } finally {
+      setIsTxLoading(false);
+    }
+  }, [presaleContract, signer, provider, userAddress, presaleStatus, totalRaisedWei, softCapWei, userContributionWei, toast, fetchUserData]);
+
+  // --- Derived State for UI Logic ---
+  const canUserClaimTokens = !presaleStatus && claimsEnabledStatus && userContributionWei.gt(0) && !hasClaimed;
+  const canUserClaimRefund = !presaleStatus && totalRaisedWei.lt(softCapWei) && userContributionWei.gt(0);
+
+  // --- Main Component Render ---
   return (
     <Card 
-      bg="rgba(255, 255, 255, 0.9)" // 90% opaque white background
-      borderWidth="1px"
-      borderColor="gray.200"
-      borderRadius="xl" // Slightly more rounded corners
-      boxShadow="2xl" // More pronounced shadow
+      bg="gray.700" // Solid background
+      // backdropFilter="blur(10px)" // Removed frosted glass effect
+      // borderWidth="1px" // Removed border
+      // borderColor="rgba(255, 255, 255, 0.2)" // Removed border color
+      borderRadius="xl" 
+      boxShadow="lg" // Soft shadow
       maxW="lg" 
       mx="auto" 
-      mt={8} // Margin top
-      mb={8} // Margin bottom
+      mt={8} 
+      mb={8} 
+      color="white" // Default text color set to white for contrast
     >
-      <CardHeader pb={2}> {/* Reduced padding bottom for header */}
-          <Flex
-            direction={{ base: 'column', md: 'row' }} // Stack on mobile, row on md and up
-            justifyContent="space-between" 
-            alignItems="center" 
-            gap={{ base: 2, md: 0 }} // Add gap for stacked layout on mobile
+      <CardHeader pb={2}> 
+        <Flex
+          direction={{ base: 'column', md: 'row' }} 
+          justifyContent="space-between" 
+          alignItems="center" 
+          gap={{ base: 4, md: 2 }} // Added gap for spacing
+        >
+          <Heading size={{ base: 'sm', md: 'md' }} color="purple.300" textAlign={{ base: 'center', md: 'left' }}>
+            INFAI Token Presale
+          </Heading>
+          <Select 
+            placeholder="Select Network"
+            value={selectedNetworkKey} 
+            onChange={handleNetworkSelectChange}
+            size="sm"
+            width={{ base: 'full', md: '180px' }}
+            bg="rgba(0, 0, 0, 0.5)" // Darker select background
+            borderColor="rgba(255, 255, 255, 0.3)"
+            _hover={{ borderColor: "purple.300" }}
+            _focus={{ borderColor: "purple.300", boxShadow: "0 0 0 1px var(--chakra-colors-purple-300)" }}
           >
-            <Heading size={{ base: 'sm', md: 'md' }} color="purple.700" textAlign={{ base: 'center', md: 'left' }}>
-              INFAI Token Presale
-            </Heading>
-            {isWalletInstalled ? (
-              isWalletConnected ? (
-                <Button
-                  onClick={handleDisconnectWallet}
-                  colorScheme="red"
-                  variant="outline"
-                  size="sm"
-                  width={{ base: 'full', md: 'auto' }} // Full width on mobile
-                >
-                  Disconnect: {truncateAddress(account)}
-                </Button>
-              ) : (
-                <Button
-                  onClick={connectWallet}
-                  isLoading={isConnecting}
-                  colorScheme="orange"
-                  size="sm"
-                  width={{ base: 'full', md: 'auto' }} // Full width on mobile
-                >
-                  Connect Wallet
-                </Button>
-              )
-            ) : (
-              <Text color="red.500" fontSize="sm" textAlign={{ base: 'center', md: 'right' }}>MetaMask not installed.</Text>
-            )}
-          </Flex>
-        </CardHeader>
-
-      <CardBody pt={4}> {/* Adjusted padding top for card body */}
-        {renderMainContent()}
-        {isOwner && (
-          <Box p={5} borderWidth="1px" borderRadius="lg" shadow="md" mt={8} borderColor="purple.300">
-            <Heading size="lg" mb={6} textAlign="center" color="purple.600">Admin Panel</Heading>
-            <VStack spacing={5} align="stretch">
-              {/* Set Rate */}
-              <Flex as="form" onSubmit={(e) => { e.preventDefault(); handleAdminSetRate(); }}>
-                <Input placeholder={`New Rate (current: ${formatNumber(presaleRate,0)} ${tokenSymbol}/ETH)`} value={adminNewRate} onChange={(e) => setAdminNewRate(e.target.value)} type="number" mr={3} focusBorderColor="purple.500"/>
-                <Button type="submit" colorScheme="purple" variant="outline" isLoading={loading}>
-                  Set Rate
-                </Button>
-              </Flex>
-
-              {/* Set Min/Max Contribution */}
-              <Flex as="form" onSubmit={(e) => { e.preventDefault(); handleAdminSetMinMaxContribution(); }}>
-                <Input placeholder={`New Min ETH (current: ${formatNumber(minContribution)})`} value={adminNewMinContribution} onChange={(e) => setAdminNewMinContribution(e.target.value)} type="number" mr={2} focusBorderColor="purple.500"/>
-                <Input placeholder={`New Max ETH (current: ${formatNumber(maxContribution)})`} value={adminNewMaxContribution} onChange={(e) => setAdminNewMaxContribution(e.target.value)} type="number" mr={3} focusBorderColor="purple.500"/>
-                <Button type="submit" colorScheme="purple" variant="outline" isLoading={loading}>
-                  Set Min/Max
-                </Button>
-              </Flex>
-
-              {/* Set Max Cap */}
-              <Flex as="form" onSubmit={(e) => { e.preventDefault(); handleAdminSetMaxCap(); }}>
-                <Input placeholder={`New Max Cap ETH (current: ${formatNumber(maxCap)})`} value={adminNewMaxCap} onChange={(e) => setAdminNewMaxCap(e.target.value)} type="number" mr={3} focusBorderColor="purple.500"/>
-                <Button type="submit" colorScheme="purple" variant="outline" isLoading={loading}>
-                  Set Max Cap
-                </Button>
-              </Flex>
-
-              <HStack spacing={4} mt={3} justifyContent="space-around">
-                <Button onClick={handleAdminTogglePresaleStatus} colorScheme={presaleActive ? "yellow" : "green"} variant="solid" isLoading={loading}>
-                  {presaleActive ? 'Deactivate Presale' : 'Activate Presale'}
-                </Button>
-                <Button onClick={handleAdminToggleClaimStatus} colorScheme={isClaimActive ? "yellow" : "blue"} variant="solid" isLoading={loading}>
-                  {isClaimActive ? 'Deactivate Claims' : 'Activate Claims'}
-                </Button>
-              </HStack>
-              
-              <Button onClick={handleAdminWithdrawFunds} colorScheme="red" mt={3} variant="solid" width="100%" isLoading={loading}>
-                Withdraw Raised Funds
+            {Object.entries(NETWORKS).map(([key, network]) => (
+              <option key={key} value={key} style={{ backgroundColor: '#2D3748' /* gray.700 */ }}>
+                {network.name}
+              </option>
+            ))}
+          </Select>
+          {isWalletInstalled ? (
+            isWalletConnected ? (
+              <Button
+                onClick={handleDisconnectWallet} 
+                colorScheme="red"
+                variant="outline"
+                size="sm"
+                width={{ base: 'full', md: 'auto' }} 
+              >
+                Disconnect: {truncateAddress(userAddress)}
               </Button>
-              {emergencyStopActive !== undefined && (
-                 <Button 
-                    onClick={handleAdminToggleEmergencyStop}
-                    colorScheme={emergencyStopActive ? "green" : "red"} 
-                    mt={2}
-                    variant="solid"
-                    width="100%"
-                    isLoading={loading}
-                  >
-                    {emergencyStopActive ? 'DISABLE Emergency Stop' : 'ENABLE Emergency Stop'}
-                  </Button>
-              )}
+            ) : (
+              <Button
+                onClick={connectWallet}
+                isLoading={isLoading} 
+                colorScheme="purple"
+                size="sm"
+                width={{ base: 'full', md: 'auto' }} 
+              >
+                Connect Wallet
+              </Button>
+            )
+          ) : (
+            <Text color="red.400" fontSize="sm" textAlign={{ base: 'center', md: 'right' }}>MetaMask not installed.</Text>
+          )}
+        </Flex>
+         {/* Connection Status Text */} 
+         <Text fontSize="xs" color="gray.400" mt={2} textAlign="center">
+            {isWalletConnected && isOnCorrectNetwork ? 
+              <Text as="span" color="green.300">Connected to {selectedNetworkConfig.name}</Text> : 
+              isWalletConnected ? 
+              <Text as="span" color="orange.300">Connected (Wrong Network - Expected: {selectedNetworkConfig.name})</Text> : 
+              `Wallet not connected. Please select a network and connect.`}
+          </Text>
+          {/* User Balances - Only show if connected to correct network */} 
+          {isWalletConnected && isOnCorrectNetwork && (
+            <VStack spacing={0} mt={1} align="center">
+              <Text fontSize="xs" color="gray.400">
+                Balance: {userEthBalance} {selectedNetworkConfig?.nativeCurrency.symbol || 'ETH'} / {userTokenBalance} {tokenSymbol || 'Tokens'}
+              </Text>
             </VStack>
-          </Box>
+          )}
+      </CardHeader>
+
+      <CardBody pt={4}> 
+        {/* Network Mismatch Alert */} 
+        {isWalletConnected && !isOnCorrectNetwork && (
+          <Alert status="warning" borderRadius="md" my={4} bg="orange.900" variant="subtle">
+            <AlertIcon color="orange.300"/>
+            <Box flex="1">
+              <AlertTitle color="orange.200">Wrong Network!</AlertTitle>
+              <AlertDescription display="block" color="orange.100">
+                Please switch to the {selectedNetworkConfig.name} network in MetaMask.
+              </AlertDescription>
+            </Box>
+            <Button 
+              colorScheme="orange"
+              variant="outline"
+              size="sm"
+              ml={4}
+              onClick={async () => { 
+                toast({title: "Switching Network...", description: `Requesting switch to ${selectedNetworkConfig.name}`, status: "info"});
+                const switched = await setupNetwork(selectedNetworkConfig); 
+                if (!switched) {
+                  toast({title: "Network Switch Failed", description: "Please switch manually in MetaMask.", status: "error"});
+                }
+              }}
+            >
+              Switch to {selectedNetworkConfig.name}
+            </Button>
+          </Alert>
         )}
+
+        {/* Main Tabs */} 
+        <Tabs isFitted variant="soft-rounded" colorScheme="purple">
+          <TabList mb="1em" bg="rgba(0, 0, 0, 0.3)" borderRadius="md" p={1}>
+            <Tab _selected={{ color: 'white', bg: 'purple.500' }}>Presale Info</Tab>
+            <Tab _selected={{ color: 'white', bg: 'purple.500' }} isDisabled={!isOnCorrectNetwork}>Contribute</Tab>
+            <Tab _selected={{ color: 'white', bg: 'purple.500' }} isDisabled={!isOnCorrectNetwork}>Claim/Refund</Tab>
+            {isOwner && (
+              <Tab _selected={{ color: 'white', bg: 'purple.500' }} isDisabled={!isOnCorrectNetwork}>Admin Panel</Tab>
+            )}
+          </TabList>
+          <TabPanels>
+            {/* Presale Info Tab */} 
+            <TabPanel>
+              <VStack spacing={3} align="stretch">
+                <Heading size="sm" textAlign="center" color="purple.300">Presale Statistics</Heading>
+                
+                <HStack justify="space-between">
+                  <Text fontWeight="bold">Status:</Text>
+                  <Text color={presaleStatus ? "green.300" : "orange.300"}>{presaleStatus ? "Active" : "Ended"}</Text>
+                </HStack>
+                <HStack justify="space-between">
+                  <Text fontWeight="bold">Rate:</Text>
+                  <Text>1 {selectedNetworkConfig?.nativeCurrency.symbol || 'ETH'} = {presaleRate > 0 ? presaleRate.toLocaleString() : '...'} {tokenSymbol || 'Tokens'}</Text>
+                </HStack>
+                
+                {/* Progress Bar */} 
+                <Box>
+                  <HStack justify="space-between" mb={1}>
+                    <Text fontSize="xs">Raised: {totalContributedEth} / {hardCapEth} {selectedNetworkConfig?.nativeCurrency.symbol || 'ETH'}</Text>
+                    <Text fontSize="xs">Soft Cap: {softCapEth} {selectedNetworkConfig?.nativeCurrency.symbol || 'ETH'}</Text>
+                  </HStack>
+                  <Progress 
+                    value={hardCapEth !== '0' ? (parseFloat(totalContributedEth) / parseFloat(hardCapEth)) * 100 : 0} 
+                    size="sm" 
+                    colorScheme="purple" 
+                    borderRadius="md"
+                    bg="rgba(255,255,255,0.1)"
+                  />
+                </Box>
+
+                <HStack justify="space-between">
+                  <Text fontWeight="bold">Min Contribution:</Text>
+                  <Text>{minContributionEth} {selectedNetworkConfig?.nativeCurrency.symbol || 'ETH'}</Text>
+                </HStack>
+                <HStack justify="space-between">
+                  <Text fontWeight="bold">Max Contribution:</Text>
+                  <Text>{maxContributionEth} {selectedNetworkConfig?.nativeCurrency.symbol || 'ETH'}</Text>
+                </HStack>
+
+                <Divider my={2} borderColor="rgba(255, 255, 255, 0.2)"/>
+
+                <FormControl>
+                  <FormLabel fontSize="sm">Presale Contract</FormLabel>
+                  <HStack>
+                    <Input type="text" value={selectedNetworkConfig.presaleAddress || 'N/A'} isReadOnly fontFamily="monospace" fontSize="xs" bg="rgba(0, 0, 0, 0.4)" borderColor="rgba(255, 255, 255, 0.3)" />
+                    <Button size="sm" variant="outline" onClick={() => { if(selectedNetworkConfig.presaleAddress) { navigator.clipboard.writeText(selectedNetworkConfig.presaleAddress); toast({ title: 'Copied Presale Address!', status: 'success', duration: 1500 }); } }}>Copy</Button>
+                  </HStack>
+                </FormControl>
+
+                <FormControl>
+                  <FormLabel fontSize="sm">Token Contract ({tokenSymbol || '...'})</FormLabel>
+                  {showTokenAddress ? (
+                    <HStack>
+                      <Input type="text" value={selectedNetworkConfig.tokenAddress || 'N/A'} isReadOnly fontFamily="monospace" fontSize="xs" bg="rgba(0, 0, 0, 0.4)" borderColor="rgba(255, 255, 255, 0.3)" />
+                      <Button size="sm" variant="outline" onClick={() => { if(selectedNetworkConfig.tokenAddress) { navigator.clipboard.writeText(selectedNetworkConfig.tokenAddress); toast({ title: 'Copied Token Address!', status: 'success', duration: 1500 }); } }}>Copy</Button>
+                    </HStack>
+                  ) : (
+                    <Button size="sm" variant="ghost" onClick={() => setShowTokenAddress(true)}>Show Address</Button>
+                  )}
+                </FormControl>
+
+              </VStack>
+            </TabPanel>
+
+            {/* Contribute Tab */} 
+            <TabPanel>
+              <VStack spacing={4} align="stretch">
+                {!presaleStatus ? (
+                  <Alert status="warning" variant="subtle" bg="orange.900" borderRadius="md">
+                    <AlertIcon color="orange.300" />
+                    <AlertTitle color="orange.200">Presale Not Active</AlertTitle>
+                    <AlertDescription color="orange.100">Contributions are currently closed.</AlertDescription>
+                  </Alert>
+                ) : !isWalletConnected || !isOnCorrectNetwork ? (
+                    <Alert status="info" variant="subtle" bg="blue.900" borderRadius="md">
+                        <AlertIcon color="blue.300" />
+                        <AlertDescription color="blue.100">Please connect your wallet to the correct network ({selectedNetworkConfig.name}) to contribute.</AlertDescription>
+                    </Alert>
+                ) : (
+                  <>
+                    {isWalletConnected && userContributionWei.gt(0) && (
+                      <Box bg="purple.800" p={3} borderRadius="md" borderWidth="1px" borderColor="purple.600">
+                        <Text fontSize="sm" fontWeight="bold" mb={1}>Your Current Contribution:</Text>
+                        <Text fontSize="sm">{ethers.utils.formatEther(userContributionWei)} ETH</Text>
+                        <Text fontSize="sm" fontWeight="bold" mt={2} mb={1}>Estimated Tokens to Receive:</Text>
+                        <Text fontSize="sm">
+                          {ethers.utils.formatUnits(
+                            userContributionWei.mul(PRESALE_CONFIG.rate), 
+                            tokenDecimals
+                          )}
+                          {' '}INFAI
+                        </Text>
+                      </Box>
+                    )}
+                    <FormControl isRequired>
+                      <FormLabel fontSize="sm">Contribution Amount ({selectedNetworkConfig?.nativeCurrency.symbol || 'ETH'})</FormLabel>
+                      <Input 
+                        type="number" 
+                        value={contributionAmount} 
+                        onChange={(e) => setContributionAmount(e.target.value)} 
+                        placeholder={`Min: ${minContributionEth}, Max: ${maxContributionEth}`} 
+                        bg="rgba(0, 0, 0, 0.5)" 
+                        borderColor="rgba(255, 255, 255, 0.3)" 
+                        _hover={{ borderColor: "purple.300" }} 
+                        _focus={{ borderColor: "purple.300", boxShadow: "0 0 0 1px var(--chakra-colors-purple-300)" }}
+                       />
+                    </FormControl>
+                    <FormControl>
+                      <FormLabel fontSize="sm">Tokens to Receive ({tokenSymbol || 'Tokens'})</FormLabel>
+                      <Input type="text" value={tokensToReceive || '0'} readOnly bg="rgba(0, 0, 0, 0.4)" borderColor="rgba(255, 255, 255, 0.3)" />
+                    </FormControl>
+                    <Button 
+                        mt={2} 
+                        size="md" // Made button larger
+                        colorScheme="purple" 
+                        onClick={handleContribute} 
+                        isLoading={isTxLoading} 
+                        isDisabled={!presaleStatus || !contributionAmount || isTxLoading || parseFloat(contributionAmount) <= 0}
+                        width="full" // Full width button
+                    >
+                        Contribute {selectedNetworkConfig?.nativeCurrency.symbol || 'ETH'}
+                    </Button>
+                  </>
+                )}
+              </VStack>
+            </TabPanel>
+
+            {/* Claim/Refund Tab */} 
+            <TabPanel>
+              <VStack spacing={4} align="stretch">
+                  {!isWalletConnected || !isOnCorrectNetwork ? (
+                      <Alert status="info" variant="subtle" bg="blue.900" borderRadius="md">
+                          <AlertIcon color="blue.300" />
+                          <AlertDescription color="blue.100">Please connect your wallet to the correct network ({selectedNetworkConfig.name}) to see claim/refund status.</AlertDescription>
+                      </Alert>
+                  ) : presaleStatus ? (
+                     <Alert status="info" variant="subtle" bg="blue.900" borderRadius="md">
+                          <AlertIcon color="blue.300" />
+                          <AlertDescription color="blue.100">Presale is still active. Claiming/Refunding will be available after it ends.</AlertDescription>
+                      </Alert>
+                  ) : (
+                  <>  {/* Container for when presale ended */} 
+                      <FormControl>
+                        <FormLabel fontSize="sm">Your Total Contribution</FormLabel>
+                        <Input type="text" value={userContribution} readOnly bg="rgba(0, 0, 0, 0.4)" borderColor="rgba(255, 255, 255, 0.3)" />
+                      </FormControl>
+                      <FormControl>
+                        <FormLabel fontSize="sm">{tokenSymbol || 'Tokens'} Claimable</FormLabel>
+                        <Input type="text" value={tokensClaimable} readOnly bg="rgba(0, 0, 0, 0.4)" borderColor="rgba(255, 255, 255, 0.3)" />
+                      </FormControl>
+                      <FormControl>
+                        <FormLabel fontSize="sm">Token Claim Status</FormLabel>
+                        <Input type="text" value={hasClaimed ? 'Tokens Claimed' : 'Not Claimed Yet'} readOnly bg="rgba(0, 0, 0, 0.4)" borderColor="rgba(255, 255, 255, 0.3)" />
+                      </FormControl>
+                      
+                      {/* Claim Tokens Button */} 
+                      <Button 
+                          mt={2} 
+                          size="md" 
+                          colorScheme="purple" 
+                          onClick={handleClaimTokens} 
+                          isLoading={isTxLoading} 
+                          isDisabled={!canUserClaimTokens || isTxLoading}
+                          title={!canUserClaimTokens ? "Cannot claim: Presale active, claims not enabled, no contribution, or already claimed." : "Claim your purchased tokens"}
+                          width="full"
+                      >
+                          Claim {tokenSymbol || 'Tokens'}
+                      </Button>
+
+                      {/* Conditionally render Refund Button */} 
+                      {canUserClaimRefund && (
+                          <>
+                              <Divider my={3} borderColor="rgba(255, 255, 255, 0.2)"/>
+                              <Alert status="warning" variant="subtle" bg="orange.900" borderRadius="md">
+                                  <AlertIcon color="orange.300" />
+                                  <AlertTitle color="orange.200">Soft Cap Not Met</AlertTitle>
+                                  <AlertDescription color="orange.100">The presale soft cap was not reached. You are eligible for a refund of your contribution.</AlertDescription>
+                              </Alert>
+                              <Button 
+                                  mt={2} 
+                                  size="md" 
+                                  colorScheme="orange" 
+                                  onClick={handleClaimRefund} 
+                                  isLoading={isTxLoading} 
+                                  isDisabled={isTxLoading} // Already checked eligibility with canUserClaimRefund
+                                  title={"Claim back your contributed funds"}
+                                  width="full"
+                              >
+                                  Claim Refund
+                              </Button>
+                          </>
+                      )}
+                      
+                      {/* Message if soft cap met and no refund possible */} 
+                      {!presaleStatus && totalRaisedWei.gte(softCapWei) && userContributionWei.gt(0) && (
+                           <Text fontSize="sm" color="gray.400" textAlign="center">Soft cap was met. Refunds are not available.</Text>
+                      )}
+                       {/* Message if no contribution */} 
+                      {!presaleStatus && userContributionWei.lte(0) && (
+                           <Text fontSize="sm" color="gray.400" textAlign="center">You did not contribute to this presale.</Text>
+                      )}
+                  </>
+                 )}
+              </VStack>
+            </TabPanel>
+
+            {/* Admin Panel Tab */} 
+            {isOwner && (
+              <TabPanel>
+                <VStack spacing={4} align="stretch">
+                  <Heading size="sm" textAlign="center" color="purple.300">Owner Controls</Heading>
+                  
+                   {/* Current Status Indicators */} 
+                   <HStack justify="space-between">
+                        <Text fontSize="sm">Presale Status:</Text>
+                        <Text fontSize="sm" color={presaleStatus ? "green.300" : "orange.300"}>{presaleStatus ? "Active" : "Ended"}</Text>
+                   </HStack>
+                   <HStack justify="space-between">
+                        <Text fontSize="sm">Emergency Stop:</Text>
+                        <Text fontSize="sm" color={emergencyStatus ? "red.300" : "green.300"}>{emergencyStatus ? "Enabled" : "Disabled"}</Text>
+                   </HStack>
+                     <HStack justify="space-between">
+                        <Text fontSize="sm">Token Claims:</Text>
+                        <Text fontSize="sm" color={claimsEnabledStatus ? "green.300" : "gray.400"}>{claimsEnabledStatus ? "Enabled" : "Disabled"}</Text>
+                   </HStack>
+                   <Divider my={2} borderColor="rgba(255, 255, 255, 0.2)"/>
+                  
+                   {/* Set Rate */} 
+                  <FormControl>
+                    <FormLabel fontSize="sm">Set New Rate (Tokens per ETH)</FormLabel>
+                    <HStack>
+                        <Input 
+                            type="number" 
+                            value={adminNewRate} 
+                            onChange={(e) => setAdminNewRate(e.target.value)} 
+                            placeholder={`Current: ${presaleRate}`} 
+                            bg="rgba(0, 0, 0, 0.5)" 
+                            borderColor="rgba(255, 255, 255, 0.3)" 
+                            _hover={{ borderColor: "purple.300" }} 
+                            _focus={{ borderColor: "purple.300", boxShadow: "0 0 0 1px var(--chakra-colors-purple-300)" }}
+                         />
+                        <Button 
+                            size="sm" 
+                            colorScheme="purple" 
+                            onClick={handleSetRate} 
+                            isLoading={isTxLoading} 
+                            isDisabled={!adminNewRate || isTxLoading || parseInt(adminNewRate) <= 0}
+                        >
+                            Set Rate
+                        </Button>
+                    </HStack>
+                  </FormControl>
+                  
+                  <Divider my={2} borderColor="rgba(255, 255, 255, 0.2)"/>
+
+                  {/* Action Buttons in a Grid for better layout */} 
+                    <Flex wrap="wrap" gap={3} justify="center">
+                      <Button 
+                        size="sm" 
+                        colorScheme={presaleStatus ? "orange" : "green"} 
+                        onClick={handleTogglePresale} 
+                        isLoading={isTxLoading} 
+                        isDisabled={isTxLoading}
+                        flexBasis="calc(50% - 6px)" // Roughly 2 buttons per row
+                      >
+                        {presaleStatus ? 'Stop Presale' : 'Start Presale'}
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        colorScheme={emergencyStatus ? "yellow" : "red"} // Swapped colors for better indication
+                        onClick={handleToggleEmergencyStop} 
+                        isLoading={isTxLoading} 
+                        isDisabled={isTxLoading}
+                        flexBasis="calc(50% - 6px)"
+                      >
+                        {emergencyStatus ? 'Disable Emergency Stop' : 'Enable Emergency Stop'}
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        colorScheme="blue" 
+                        onClick={handleEnableTokenClaims} 
+                        isLoading={isTxLoading} 
+                        isDisabled={claimsEnabledStatus || isTxLoading || presaleStatus} // Can't enable if presale active
+                        title={claimsEnabledStatus ? "Token claims already enabled" : presaleStatus ? "Cannot enable claims while presale is active" : "Enable users to claim tokens (requires soft cap met)"}
+                        flexBasis="calc(50% - 6px)"
+                      >
+                        Enable Token Claims {claimsEnabledStatus ? "(Enabled)" : ""}
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        colorScheme="teal" 
+                        onClick={handleWithdrawFunds} 
+                        isLoading={isTxLoading} 
+                        isDisabled={isTxLoading} // Add more checks if needed (e.g., !claimsEnabledStatus)
+                        title={"Withdraw collected funds (requires soft cap met and claims enabled)"}
+                        flexBasis="calc(50% - 6px)"
+                      >
+                        Withdraw Funds
+                      </Button>
+                    </Flex>
+                </VStack>
+              </TabPanel>
+            )}
+          </TabPanels>
+        </Tabs>
       </CardBody>
 
       <CardFooter>
-        <VStack spacing={3} width="100%">
-          <Text fontSize="xs" color="gray.500" textAlign="center">
-            All contributions are final. Please ensure you are sending funds from a wallet you control.
-            Always verify the contract address before interacting.
+        <VStack spacing={2} width="100%">
+          <Text fontSize="xs" color="gray.400" textAlign="center">
+            All contributions are final unless the soft cap is not met. Please ensure you are sending funds from a wallet you control.
+            Always verify contract addresses before interacting.
           </Text>
-          <Text fontSize="xs" color="gray.500" textAlign="center">
-            Contract: {truncateAddress(PRESALE_CONTRACT_ADDRESS)}
-          </Text>
+          {/* Optionally show addresses here again */} 
         </VStack>
       </CardFooter>
     </Card>
   );
-};
+}
 
 export default PresaleCard;

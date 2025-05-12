@@ -54,3 +54,14 @@
   50% { transform: translate(0, 15px); }
   100% { transform: translate(0, 0px); }
 }
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.scroll-container::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+.scroll-container {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
