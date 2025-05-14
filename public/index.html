@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta
+      name="description"
+      content="Web site created using create-react-app"
+    />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+    <!--
+      manifest.json provides metadata used when your web app is installed on a
+      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
+    -->
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <!--
+{{ ... }}
+    -->
+    <title>DOGECAT Presale DApp</title>
+    <style>
+      html, body, #root {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        overflow-x: hidden; /* Optional: prevent horizontal scroll if content is too wide */
+      }
+    </style>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+    <!--
+      This HTML file is a template.
+      If you open it directly in the browser, you will see an empty page.
+
+      You can add webfonts, meta tags, or analytics to this file.
+      The build step will place the bundled scripts into the <body> tag.
+
+      To begin the development, run `npm start` or `yarn start`.
+      To create a production bundle, use `npm run build` or `yarn build`.
+    -->
+    
+    <!-- Token calculator script (independent of React) -->
+    <!-- <script src="%PUBLIC_URL%/standalone-calculator.js"></script> -->
+    
+    <!-- Inline script for handling token calculator -->
+    <!--
+    <script>
+      // Simple token calculator that runs completely outside of React
+      document.addEventListener('DOMContentLoaded', function() {
+        console.log("DOM Content Loaded - Setting up calculator");
+        
+        // Function to set up the calculator
+        function setupCalculator() {
+          // Get elements
+          const inputField = document.getElementById('eth-standalone-input');
+          const tokenDisplay = document.getElementById('token-display');
+          const hiddenEthInput = document.getElementById('eth-amount-hidden');
+          const hiddenTokenInput = document.getElementById('tokens-to-receive-hidden');
+          
+          if (!inputField || !tokenDisplay) {
+            console.log("Calculator elements not ready, retrying in 100ms", { 
+              inputField: !!inputField, 
+              tokenDisplay: !!tokenDisplay,
+              hiddenEthInput: !!hiddenEthInput,
+              hiddenTokenInput: !!hiddenTokenInput
+            });
+            setTimeout(setupCalculator, 100);
+            return;
+          }
+          
+          console.log("Setting up standalone token calculator - elements found");
+          
+          // Function to calculate tokens
+          function calculateTokens() {
+            const value = inputField.value;
+            console.log("Input changed:", value);
+            
+            // Update hidden input for React state if available
+            if (hiddenEthInput) {
+              hiddenEthInput.value = value;
+              // Trigger change event
+              const event = new Event('change', { bubbles: true });
+              hiddenEthInput.dispatchEvent(event);
+            }
+            
+            if (value && !isNaN(parseFloat(value))) {
+              // Calculate tokens
+              const ethAmount = parseFloat(value);
+              const rawTokens = ethAmount * 1000; // 1000 DOGECAT per ETH
+              const taxAmount = rawTokens * 0.03; // 3% tax
+              const netTokens = rawTokens - taxAmount;
+              
+              // Format for display
+              const formattedTokens = netTokens.toLocaleString(undefined, {
+                maximumFractionDigits: 2
+              });
+              
+              console.log("Calculated tokens:", {
+                ethAmount,
+                rawTokens,
+                taxAmount,
+                netTokens,
+                formattedTokens
+              });
+              
+              // Update display
+              tokenDisplay.textContent = formattedTokens + " DOGECAT";
+              
+              // Update hidden input if available
+              if (hiddenTokenInput) {
+                hiddenTokenInput.value = netTokens.toString();
+                // Trigger change event
+                const event = new Event('change', { bubbles: true });
+                hiddenTokenInput.dispatchEvent(event);
+              }
+            } else {
+              // Handle empty/invalid input
+              tokenDisplay.textContent = "0 DOGECAT";
+              
+              // Update hidden input if available
+              if (hiddenTokenInput) {
+                hiddenTokenInput.value = "0";
+                // Trigger change event
+                const event = new Event('change', { bubbles: true });
+                hiddenTokenInput.dispatchEvent(event);
+              }
+            }
+          }
+          
+          // Add multiple listeners to catch all input changes
+          console.log("Adding event listeners to input field");
+          inputField.addEventListener('input', calculateTokens);
+          inputField.addEventListener('change', calculateTokens);
+          inputField.addEventListener('keyup', calculateTokens);
+          
+          // Initial calculation
+          calculateTokens();
+        }
+        
+        // Start the setup process
+        setupCalculator();
+        
+        // Also try again after delays to ensure React has rendered
+        setTimeout(setupCalculator, 500);
+        setTimeout(setupCalculator, 1000);
+        setTimeout(setupCalculator, 2000);
+      });
+      
+      // Additional fallback initialization
+      window.addEventListener('load', function() {
+        console.log("Window loaded - Setting up calculator");
+        
+        function setupListeners() {
+          const input = document.getElementById('eth-standalone-input');
+          const display = document.getElementById('token-display');
+          
+          if (!input || !display) {
+            console.log("Elements not found in load event, retrying...");
+            setTimeout(setupListeners, 200);
+            return;
+          }
+          
+          console.log("Setting up direct event listeners");
+          
+          input.oninput = function() {
+            const value = this.value;
+            console.log("Direct oninput fired:", value);
+            
+            if (value && !isNaN(parseFloat(value))) {
+              const ethAmount = parseFloat(value);
+              const tokens = ethAmount * 1000 * 0.97; // 1000 DOGECAT per ETH with 3% tax
+              
+              // Format and display
+              const formatted = tokens.toLocaleString(undefined, {
+                maximumFractionDigits: 2
+              });
+              
+              display.textContent = formatted + " DOGECAT";
+            } else {
+              display.textContent = "0 DOGECAT";
+            }
+          };
+        }
+        
+        setupListeners();
+      });
+    </script>
+    -->
+  </body>
+</html>
