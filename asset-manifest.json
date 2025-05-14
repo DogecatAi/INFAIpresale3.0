@@ -1,16 +1,16 @@
 {
   "files": {
-    "main.css": "/INFAI-PRESALE-2.0/static/css/main.2031a20a.css",
-    "main.js": "/INFAI-PRESALE-2.0/static/js/main.5134608b.js",
-    "static/js/453.df3bf070.chunk.js": "/INFAI-PRESALE-2.0/static/js/453.df3bf070.chunk.js",
-    "static/media/background.png": "/INFAI-PRESALE-2.0/static/media/background.c69d9b9f60a4a0cf6492.png",
-    "index.html": "/INFAI-PRESALE-2.0/index.html",
-    "main.2031a20a.css.map": "/INFAI-PRESALE-2.0/static/css/main.2031a20a.css.map",
-    "main.5134608b.js.map": "/INFAI-PRESALE-2.0/static/js/main.5134608b.js.map",
-    "453.df3bf070.chunk.js.map": "/INFAI-PRESALE-2.0/static/js/453.df3bf070.chunk.js.map"
+    "main.css": "/INFAIpresale3.0/static/css/main.e500e3ad.css",
+    "main.js": "/INFAIpresale3.0/static/js/main.148211d2.js",
+    "static/js/453.df3bf070.chunk.js": "/INFAIpresale3.0/static/js/453.df3bf070.chunk.js",
+    "static/media/background.png": "/INFAIpresale3.0/static/media/background.c69d9b9f60a4a0cf6492.png",
+    "index.html": "/INFAIpresale3.0/index.html",
+    "main.e500e3ad.css.map": "/INFAIpresale3.0/static/css/main.e500e3ad.css.map",
+    "main.148211d2.js.map": "/INFAIpresale3.0/static/js/main.148211d2.js.map",
+    "453.df3bf070.chunk.js.map": "/INFAIpresale3.0/static/js/453.df3bf070.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.2031a20a.css",
-    "static/js/main.5134608b.js"
+    "static/css/main.e500e3ad.css",
+    "static/js/main.148211d2.js"
   ]
 }
