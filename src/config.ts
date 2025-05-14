@@ -20,7 +20,7 @@ export const NETWORKS = {
     chainId: 97,
     rpcUrl: "https://data-seed-prebsc-1-s1.binance.org:8545/",
     tokenAddress: "0x339643416f16D4C3dC2c4b44a281949363b31dBe",
-    presaleAddress: "0x1Fa28E194Eaa1279984Cba20E8f0c3Aaa174F4cC",
+    presaleAddress: "0xb5D653761A9A1f8FDe9a835BF7411b72a02940D4",
     explorer: "https://testnet.bscscan.com",
     nativeCurrency: { 
       name: 'BNB',
