@@ -3,7 +3,7 @@ export const NETWORKS = {
     name: "Infinaeon",
     chainId: 420000,
     rpcUrl: "https://rpc.infinaeon.com",
-    tokenAddress: "0x8FBc7648832358aC8cd76d705F9746179F9e7BF4",
+    tokenAddress: "0x72bFf9b300Fc8A501Ec268d9787501D8B379024B",
     // NOTE: The presale address you provided was missing the last 2 characters.
     // I'll use the one previously defined in PresaleCard.tsx for now.
     // Please verify if this is correct or provide the full address.
