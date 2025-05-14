@@ -2,7 +2,7 @@
   "name": "token-presale-dapp",
   "version": "0.1.0",
   "private": true,
-  "homepage": "https://DogecatAi.github.io/INFAI-PRESALE-2.0",
+  "homepage": "https://DogecatAi.github.io/INFAIpresale3.0",
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
