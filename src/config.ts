@@ -7,7 +7,7 @@ export const NETWORKS = {
     // NOTE: The presale address you provided was missing the last 2 characters.
     // I'll use the one previously defined in PresaleCard.tsx for now.
     // Please verify if this is correct or provide the full address.
-    presaleAddress: "0xc979C705Cb994caD5f67c2D656e96446EE2E30A8", 
+    presaleAddress: "0x751789156002311162A5B337a1F6FAaF747DF792", 
     explorer: "https://explorer.infinaeon.com",
     nativeCurrency: { 
       name: 'Infinaeon Ether',
