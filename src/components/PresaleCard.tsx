@@ -1147,7 +1147,7 @@ const PresaleCard = () => {
                 
                 <HStack justify="space-between">
                   <Text fontWeight="bold">Status:</Text>
-                  <Text color={presaleStatus ? "green.300" : "orange.300"}>{presaleStatus ? "Active" : "Ended"}</Text>
+                  <Text color={!isWalletConnected ? "green.300" : (presaleStatus ? "green.300" : "orange.300")}>{!isWalletConnected ? "In Progress" : (presaleStatus ? "Active" : "Ended")}</Text>
                 </HStack>
                 <HStack justify="space-between">
                   <Text fontWeight="bold">Rate:</Text>
